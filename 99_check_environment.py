@@ -26,7 +26,7 @@ if str(PROJECT_ROOT) not in sys.path:
 from src.params_schema import current  # noqa: E402
 
 PARAMS = current()
-COMPOSITION_FILE = PROJECT_ROOT / PARAMS.scope.composition_file_name
+COMPOSITION_FILE = PARAMS.composition_path(PROJECT_ROOT)
 
 # The columns the workbook is expected to have. Checked, not assumed: a renamed
 # or dropped column should fail here, loudly, and not halfway through a model run.
@@ -63,7 +63,7 @@ def load_composition() -> "pandas.DataFrame":  # noqa: F821 -- imported inside, 
     if not COMPOSITION_FILE.exists():
         raise SystemExit(
             f"Input workbook not found: {COMPOSITION_FILE}\n"
-            "It is not tracked in git (see .gitignore) -- copy it in from iCloud."
+            "Nothing under data/ is tracked in git -- copy the workbook in from iCloud."
         )
 
     workbook = pd.ExcelFile(COMPOSITION_FILE)

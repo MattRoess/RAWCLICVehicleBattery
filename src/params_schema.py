@@ -42,11 +42,27 @@ class ParameterError(ValueError):
 # ======================================================================
 
 @dataclass
+class PathParams:
+    """Where the data comes from and where results are written."""
+
+    # The folder holding the input workbooks, relative to the project root.
+    # Nothing under data/ is tracked in git -- no data file goes to GitHub -- so
+    # a fresh clone has to be given the workbook separately.
+    # SAFE TO CHANGE: yes, if the data is kept somewhere else.
+    input_dir: str = "data/raw"
+
+    # Where the figures are written, relative to the project root. Everything
+    # here is regenerable by re-running the scripts, and untracked for that
+    # reason as much as for the no-data-in-git rule.
+    # SAFE TO CHANGE: yes.
+    output_dir: str = "data/processed"
+
+
+@dataclass
 class ScopeParams:
     """Which part of the workbook this project reads."""
 
-    # The consolidated composition workbook. It is not tracked in git -- no data
-    # file goes to GitHub -- so a fresh clone has to be given it.
+    # The consolidated composition workbook, inside paths.input_dir.
     # SAFE TO CHANGE: yes, when a newer version of the file arrives.
     composition_file_name: str = "BATT_consolidated_composition.xlsx"
 
@@ -199,6 +215,148 @@ class DrawingParams:
     })
 
 
+@dataclass
+class InterpolationParams:
+    """How a battery size that is not in the workbook is arrived at."""
+
+    # The capacities the drawing and the interpolation are built from, in kWh.
+    # These are the workbook's own sheets and are read, never invented.
+    # Set in scope.bev_capacities_kwh; repeated here only as a reminder that the
+    # anchors ARE the data and everything between and beyond them is inferred.
+
+    # WHAT IS INTERPOLATED: 'mass' interpolates kilograms against capacity and
+    # divides afterwards; 'intensity' interpolates kg/kWh directly.
+    # 'mass' is the default and the defensible one. In kg/kWh the anchors are
+    # hyperbolic -- a fixed-mass part like currentCollectorAnode falls 0.86 ->
+    # 0.22 kg/kWh from 25 to 100 kWh purely because the denominator grew -- and
+    # interpolating that shape smears fixed-mass parts together with the ones
+    # that really do scale. In kilograms the same part is flat at ~21 kg and the
+    # curve carries its physical meaning.
+    # SAFE TO CHANGE: yes, but 'intensity' is here to test the difference, not
+    # to be used for results.
+    interpolate_on: str = "mass"
+
+    # BETWEEN THE ANCHORS: 'pchip' is shape-preserving -- monotone where the
+    # data is monotone, and it cannot overshoot into a bump the anchors do not
+    # support. 'linear' joins them with straight segments.
+    # SAFE TO CHANGE: yes. Both are honest; pchip is smoother, linear is the one
+    # you can check by hand.
+    interpolation_method: str = "pchip"
+
+    # BEYOND THE ANCHORS: extrapolation is always LINEAR, whatever the method
+    # above. A cubic continued past its last knot diverges, and at 150 kWh --
+    # half again beyond the largest sheet -- that is how a plot ends up with a
+    # negative cathode. 'last_segment' continues the slope of the final pair of
+    # anchors; 'fit' continues the least-squares slope through all of them.
+    # SAFE TO CHANGE: yes. 'last_segment' follows the data's local behaviour,
+    # 'fit' is steadier when the last two anchors happen to wobble.
+    extrapolation: str = "last_segment"
+
+    # The capacity range the public function will answer for, in kWh. Outside
+    # this it refuses rather than returning a number nobody should trust.
+    # SAFE TO CHANGE: yes -- but widening it does not make the answer better.
+    # Above the largest anchor (100 kWh) every value is an extrapolation, and
+    # the further out, the more it is the straight line's opinion and not data.
+    min_capacity_kwh: float = 10.0
+    max_capacity_kwh: float = 200.0
+
+    # A linear continuation can cross zero: a few series have a slightly
+    # negative slope between their last two anchors. Negative mass is never
+    # right, so it is clamped, and the clamp is reported rather than hidden.
+    # SAFE TO CHANGE: no, not sensibly.
+    clamp_negative_mass: bool = True
+
+
+@dataclass
+class MonteCarloParams:
+    """The uncertainty around every value, and how it is sampled."""
+
+    # Turn the Monte Carlo off to get the central values alone, fast.
+    # SAFE TO CHANGE: yes.
+    enabled: bool = True
+
+    # How many draws. The bands settle by a few thousand; more only smooths the
+    # tails of a distribution whose width is a flat rule to begin with (below).
+    # SAFE TO CHANGE: yes. 2,000 is a working figure, 20,000 for anything shown.
+    n_draws: int = 20_000
+
+    # Fixed seed, so the same settings give the same bands and two runs can be
+    # compared. Set to None for a different sample every run.
+    # SAFE TO CHANGE: yes.
+    random_seed: int | None = 20260907
+
+    # The shape sampled between min_value and max_value, with Value as the mode:
+    # 'triangular' or 'uniform'. Triangular keeps Value the most likely outcome,
+    # which is what a consolidated central estimate is meant to be.
+    # SAFE TO CHANGE: yes.
+    distribution: str = "triangular"
+
+    # ⚠️ WHAT THE WORKBOOK'S UNCERTAINTY ACTUALLY IS. Every non-zero row in
+    # BATT_consolidated_composition.xlsx has min_value = 0.9 x Value and
+    # max_value = 1.1 x Value -- all 805 of them, whether the value was
+    # consolidated from 1 source or from 21, and DQS is 2 throughout. So the
+    # spread is a flat +/-10% convention, NOT an observed range, and the Monte
+    # Carlo can only propagate that convention. It cannot tell a well-sourced
+    # value from a lone one, and a narrow band here means the rule was narrow,
+    # not that the number is well known. Leave True to use the file's own
+    # min/max; set False to impose relative_band instead.
+    # SAFE TO CHANGE: yes.
+    use_workbook_min_max: bool = True
+
+    # The fractional band used when use_workbook_min_max is False -- 0.10 gives
+    # the same +/-10% the file states, which makes the two settings easy to
+    # compare. Raise it to see what a more honest spread would do to the result.
+    # SAFE TO CHANGE: yes.
+    relative_band: float = 0.10
+
+    # ONE DRAW PER SERIES, SHARED ACROSS CAPACITIES. A component's error does
+    # not change between 60 and 61 kWh, so the same quantile is applied to that
+    # series at every anchor. Drawing each anchor independently would put kinks
+    # in a curve that is supposed to be smooth, and would shrink the band by
+    # averaging errors that are in truth the same error.
+    # SAFE TO CHANGE: no, not without a reason to believe the anchors err
+    # independently.
+    correlate_across_capacities: bool = True
+
+    # The percentiles reported and drawn as the band.
+    # SAFE TO CHANGE: yes.
+    lower_percentile: float = 2.5
+    upper_percentile: float = 97.5
+
+
+@dataclass
+class CapacityFigureParams:
+    """The mass-against-capacity figures."""
+
+    # Per-component small multiples: mass in kg against capacity, one panel per
+    # component, anchors as dots, the interpolation as a line, the Monte Carlo
+    # as a band.
+    # SAFE TO CHANGE: yes. Keep the .png suffix.
+    components_file_name: str = "battery_mass_by_capacity.png"
+
+    # Total battery mass against capacity, one line per chemistry.
+    # SAFE TO CHANGE: yes. Keep the .png suffix.
+    totals_file_name: str = "battery_total_mass_by_capacity.png"
+
+    # The chemistry drawn in the per-component figure. The pack-level components
+    # are the same whichever is chosen.
+    # SAFE TO CHANGE: yes -- any Layer 1 chemistry in the workbook.
+    components_figure_chemistry: str = "battLiNMC_midNi"
+
+    # The capacity range plotted, and how many points the curve is drawn with.
+    # The range deliberately runs past the largest anchor so the extrapolated
+    # part is visible as such rather than hidden inside the data range.
+    # SAFE TO CHANGE: yes, within interpolation.min/max_capacity_kwh.
+    plot_min_kwh: float = 25.0
+    plot_max_kwh: float = 150.0
+    plot_points: int = 126
+
+    # Figure size in inches for each of the two figures.
+    # SAFE TO CHANGE: yes.
+    components_figure_size_in: tuple[float, float] = (16.0, 11.0)
+    totals_figure_size_in: tuple[float, float] = (11.0, 7.5)
+
+
 # ======================================================================
 #  END OF SETTINGS.  Below here is plumbing.
 # ======================================================================
@@ -207,19 +365,46 @@ class DrawingParams:
 class Params:
     """Every setting, in one object."""
 
-    SECTIONS = ("scope", "drawing")
+    SECTIONS = ("paths", "scope", "drawing", "interpolation", "monte_carlo", "capacity_figure")
 
+    paths: PathParams = field(default_factory=PathParams)
     scope: ScopeParams = field(default_factory=ScopeParams)
     drawing: DrawingParams = field(default_factory=DrawingParams)
+    interpolation: InterpolationParams = field(default_factory=InterpolationParams)
+    monte_carlo: MonteCarloParams = field(default_factory=MonteCarloParams)
+    capacity_figure: CapacityFigureParams = field(default_factory=CapacityFigureParams)
 
     def sheet_names(self) -> list[str]:
         """The workbook sheets in scope, in the order the capacities are listed."""
         return [self.scope.sheet_name_template.format(kwh=kwh)
                 for kwh in self.scope.bev_capacities_kwh]
 
+    def composition_path(self, project_root) -> "Path":
+        """The workbook's full path, assembled in one place."""
+        from pathlib import Path
+        return Path(project_root) / self.paths.input_dir / self.scope.composition_file_name
+
+    def output_path(self, project_root, file_name: str) -> "Path":
+        """Where a figure goes, with the folder created if it is not there yet."""
+        from pathlib import Path
+        directory = Path(project_root) / self.paths.output_dir
+        directory.mkdir(parents=True, exist_ok=True)
+        return directory / file_name
+
     def validate(self) -> None:
         """Every check that can be made without opening the workbook."""
+        from pathlib import Path
+
         scope, drawing = self.scope, self.drawing
+
+        for name in ("input_dir", "output_dir"):
+            value = getattr(self.paths, name)
+            if not value:
+                raise ParameterError(f"paths.{name} is empty.")
+            if Path(value).is_absolute():
+                raise ParameterError(
+                    f"paths.{name} must be relative to the project root, so the "
+                    f"project still works when it is cloned elsewhere: {value!r}")
 
         if not scope.bev_capacities_kwh:
             raise ParameterError("scope.bev_capacities_kwh is empty -- nothing to read.")
@@ -280,6 +465,75 @@ class Params:
             raise ParameterError(
                 "drawing.role_colours must define 'cell_body' -- it is the fallback "
                 "for a cell component with no role.")
+
+        interp, mc, figure = self.interpolation, self.monte_carlo, self.capacity_figure
+
+        if interp.interpolate_on not in ("mass", "intensity"):
+            raise ParameterError(
+                f"interpolation.interpolate_on must be 'mass' or 'intensity': "
+                f"{interp.interpolate_on!r}")
+        if interp.interpolation_method not in ("pchip", "linear"):
+            raise ParameterError(
+                f"interpolation.interpolation_method must be 'pchip' or 'linear': "
+                f"{interp.interpolation_method!r}")
+        if interp.extrapolation not in ("last_segment", "fit"):
+            raise ParameterError(
+                f"interpolation.extrapolation must be 'last_segment' or 'fit': "
+                f"{interp.extrapolation!r}")
+        if interp.min_capacity_kwh <= 0:
+            raise ParameterError(
+                f"interpolation.min_capacity_kwh must be positive: {interp.min_capacity_kwh}")
+        if interp.max_capacity_kwh <= interp.min_capacity_kwh:
+            raise ParameterError(
+                f"interpolation.max_capacity_kwh ({interp.max_capacity_kwh}) must be "
+                f"above min_capacity_kwh ({interp.min_capacity_kwh}).")
+        anchors = scope.bev_capacities_kwh
+        if anchors and not (interp.min_capacity_kwh <= min(anchors)
+                            and interp.max_capacity_kwh >= max(anchors)):
+            raise ParameterError(
+                f"the allowed capacity range [{interp.min_capacity_kwh}, "
+                f"{interp.max_capacity_kwh}] must contain the anchors "
+                f"{sorted(anchors)} -- refusing to answer for a size the workbook "
+                "actually supplies would be absurd.")
+        if interp.interpolation_method == "pchip" and len(anchors) < 2:
+            raise ParameterError(
+                "interpolation_method 'pchip' needs at least two anchors; "
+                f"scope.bev_capacities_kwh has {len(anchors)}.")
+
+        if mc.n_draws < 1:
+            raise ParameterError(f"monte_carlo.n_draws must be at least 1: {mc.n_draws}")
+        if mc.distribution not in ("triangular", "uniform"):
+            raise ParameterError(
+                f"monte_carlo.distribution must be 'triangular' or 'uniform': "
+                f"{mc.distribution!r}")
+        if not 0 <= mc.relative_band < 1:
+            raise ParameterError(
+                f"monte_carlo.relative_band is a fraction, so it must be in [0, 1): "
+                f"{mc.relative_band}")
+        if not 0 <= mc.lower_percentile < mc.upper_percentile <= 100:
+            raise ParameterError(
+                f"monte_carlo percentiles must satisfy 0 <= lower < upper <= 100: "
+                f"{mc.lower_percentile}, {mc.upper_percentile}")
+
+        for name in ("components_file_name", "totals_file_name"):
+            if not getattr(figure, name).endswith(".png"):
+                raise ParameterError(
+                    f"capacity_figure.{name} must end in '.png' -- PNG is the only "
+                    f"format written: {getattr(figure, name)!r}")
+        if figure.plot_min_kwh >= figure.plot_max_kwh:
+            raise ParameterError(
+                f"capacity_figure.plot_min_kwh ({figure.plot_min_kwh}) must be below "
+                f"plot_max_kwh ({figure.plot_max_kwh}).")
+        if not (interp.min_capacity_kwh <= figure.plot_min_kwh
+                and figure.plot_max_kwh <= interp.max_capacity_kwh):
+            raise ParameterError(
+                f"the plotted range [{figure.plot_min_kwh}, {figure.plot_max_kwh}] "
+                f"leaves the range the function will answer for "
+                f"[{interp.min_capacity_kwh}, {interp.max_capacity_kwh}] -- the "
+                "figure would have a gap where the function refuses.")
+        if figure.plot_points < 2:
+            raise ParameterError(
+                f"capacity_figure.plot_points must be at least 2: {figure.plot_points}")
 
 
 def current() -> Params:

@@ -46,11 +46,11 @@ EDGE = "#8a8a8a"
 
 def load_bev_rows(params: Params) -> pd.DataFrame:
     """The BEV sheets in scope, concatenated, with the sheet kept as a column."""
-    path = PROJECT_ROOT / params.scope.composition_file_name
+    path = params.composition_path(PROJECT_ROOT)
     if not path.exists():
         raise SystemExit(
             f"Input workbook not found: {path}\n"
-            "It is not tracked in git (see .gitignore) -- copy it in from iCloud.")
+            "Nothing under data/ is tracked in git -- copy the workbook in from iCloud.")
 
     frames = []
     for sheet_name in params.sheet_names():
@@ -233,7 +233,7 @@ def main() -> int:
     print(f"pack-level components ({len(pack_side)}): {[c['name'] for c in pack_side]}")
 
     figure = draw(cell_side, pack_side, params)
-    path = PROJECT_ROOT / params.drawing.output_file_name
+    path = params.output_path(PROJECT_ROOT, params.drawing.output_file_name)
     figure.savefig(path, dpi=params.drawing.output_dpi, bbox_inches="tight", facecolor="white")
     print(f"Saved {path}")
     return 0

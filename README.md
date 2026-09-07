@@ -12,16 +12,82 @@ It is the battery counterpart to `RAWCLICVehicleComposition` (whole car) and
 ## Running it
 
 ```bash
-./.venv/bin/python 00_parameters.py             # always first
-./.venv/bin/python 99_check_environment.py      # smoke test
-./.venv/bin/python 01_draw_battery_structure.py # the product-structure drawing
+./.venv/bin/python 00_parameters.py                # always first
+./.venv/bin/python 99_check_environment.py         # smoke test
+./.venv/bin/python 01_draw_battery_structure.py    # what a battery is made of
+./.venv/bin/python 02_composition_by_capacity.py   # how much, at any capacity
 ```
 
 | script | what it does |
 |---|---|
 | `00_parameters.py` | Turns `src/params_schema.py` into `params.xlsx`, **and validates it**. `--check` validates and prints without writing. |
 | `99_check_environment.py` | Checks the interpreter, the pinned packages and the workbook, and prints the workbook's real structure. Writes nothing. |
-| `01_draw_battery_structure.py` | Draws every component of the BEV battery, labelled with the workbook's own `Layer 2` codes. Writes `battery_product_structure.png`. |
+| `01_draw_battery_structure.py` | Draws every component of the BEV battery, labelled with the workbook's own `Layer 2` codes. |
+| `02_composition_by_capacity.py` | The composition at **any** capacity, with a Monte Carlo band. Prints a table and writes two figures. |
+
+`02` takes arguments:
+
+```bash
+./.venv/bin/python 02_composition_by_capacity.py --capacity 150 --level element --chemistry battLiNMC_highNi
+```
+
+`--level` is `component`, `material` or `element`; `--no-figures` prints the
+table alone.
+
+## Where the files are
+
+| folder | holds |
+|---|---|
+| `data/raw/` | `BATT_consolidated_composition.xlsx` — the input, supplied separately |
+| `data/processed/` | the figures, all regenerable |
+| `src/` | `params_schema.py`, `params_io.py`, `composition.py` |
+
+The whole `data/` tree is untracked. A fresh clone gets the code only and needs
+`data/raw/` supplied from iCloud.
+
+## Composition at any capacity
+
+`src/composition.py` turns the workbook's five BEV sizes into an answer for any
+capacity — interpolated between 25 and 100 kWh, extrapolated beyond, at
+component, material or element level, for any of the seven chemistries.
+
+```python
+from src.composition import CompositionModel
+from src.params_schema import current
+
+model = CompositionModel(current())
+model.weights_at(150.0, chemistry="battLiNMC_midNi", level="component")
+```
+
+Three things about it are worth knowing before the numbers are used.
+
+**It interpolates mass, not kg/kWh.** A part whose mass does not change with
+capacity — `currentCollectorAnode` on high-Ni is 21.4 kg at 25 kWh and 21.8 kg at
+100 kWh — has an intensity that falls 0.86 → 0.22 kg/kWh purely because the
+denominator grew. Interpolating that hyperbola mixes fixed-mass parts up with
+the ones that really do scale. In kilograms the curve means something, so the
+intensity is multiplied up, interpolated, and divided back out.
+
+**Everything past 100 kWh is a straight line, and says so.** Extrapolation is
+linear whatever `interpolation_method` is set to — a cubic continued past its
+last knot diverges, and at 150 kWh that is how a figure ends up with a negative
+cathode. The `extrapolated` column marks those rows and the figures shade the
+region. Read the right-hand panel of the totals figure as the sanity check: a
+straight line in mass implies energy density keeps improving with size, which is
+an assumption the workbook never made.
+
+**The ±10% band is a convention, not a measurement.** Every non-zero row of the
+workbook has `min_value = 0.9 × Value` and `max_value = 1.1 × Value` — all 805 of
+them, whether the value was consolidated from 1 source or 21, with `DQS = 2`
+throughout. The Monte Carlo propagates that faithfully, which means the band is
+the convention carried through the arithmetic and **not** evidence about how
+well any of these numbers is known. A narrow band here means the rule was
+narrow.
+
+One consequence worth stating separately: at element level the components do not
+add up. `batteryCellCasing` and `batteryCellSeparator` have no element rows at
+all, so an element-level reading of a 150 kWh NMC battery accounts for 626 kg of
+the 684 kg the components come to — 8% missing, silently, unless you look.
 
 ## Changing what it does
 
