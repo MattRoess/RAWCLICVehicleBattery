@@ -12,11 +12,39 @@ It is the battery counterpart to `RAWCLICVehicleComposition` (whole car) and
 ## Running it
 
 ```bash
-./.venv/bin/python 00_check_environment.py
+./.venv/bin/python 00_parameters.py             # always first
+./.venv/bin/python 99_check_environment.py      # smoke test
+./.venv/bin/python 01_draw_battery_structure.py # the product-structure drawing
 ```
 
-That is the smoke test: it checks the interpreter, the pinned packages and the
-workbook, and prints the workbook's real structure. It writes nothing.
+| script | what it does |
+|---|---|
+| `00_parameters.py` | Turns `src/params_schema.py` into `params.xlsx`, **and validates it**. `--check` validates and prints without writing. |
+| `99_check_environment.py` | Checks the interpreter, the pinned packages and the workbook, and prints the workbook's real structure. Writes nothing. |
+| `01_draw_battery_structure.py` | Draws every component of the BEV battery, labelled with the workbook's own `Layer 2` codes. Writes `battery_product_structure.png`. |
+
+## Changing what it does
+
+Every value lives in `src/params_schema.py` -- which sizes are in scope, which
+`parameterCode` means what, the drawing geometry, the component glosses and
+colours. Nothing is hardcoded in the scripts.
+
+1. Edit only what is to the **right** of the `=`. Renaming a parameter breaks the code.
+2. Keep the **type** -- a number stays a number, text stays quoted.
+3. Keep the punctuation inside `{ }` and `( )`. A missing comma is the commonest breakage.
+
+Then always:
+
+```bash
+./.venv/bin/python 00_parameters.py
+```
+
+That regenerates the register *and* validates the edit, so a mistake surfaces in
+a second rather than as a wrong drawing. `params.xlsx` is an output: editing it
+changes nothing, because nothing reads it. It is untracked, like every other
+`.xlsx` here -- regenerate it rather than looking for it in a fresh clone.
+
+The drawing writes **PNG only**.
 
 ### In Positron
 

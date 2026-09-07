@@ -25,5 +25,5 @@ Thumbs.db
 *.npy
 *.png
 
-# Generated figures (regenerate with 01_draw_battery_structure.py)
-*.svg
+# params.xlsx is caught by the *.xlsx rule above and stays untracked. It is a
+# generated register, not a source: regenerate it with 00_parameters.py.

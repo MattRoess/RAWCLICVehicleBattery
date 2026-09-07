@@ -5,9 +5,9 @@
 Smoke test for a fresh checkout: proves the interpreter, the packages and the
 input workbook are all where the rest of this project will expect them.
 
-Run it first, before writing or running anything else:
+Run it after `00_parameters.py`, which is what validates the settings:
 
-    ./.venv/bin/python 00_check_environment.py
+    ./.venv/bin/python 99_check_environment.py
 
 It reads `BATT_consolidated_composition.xlsx` and prints what is actually in it
 -- sheets, row counts, and the distinct values of every key column -- so the
@@ -20,7 +20,13 @@ import sys
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent
-COMPOSITION_FILE = PROJECT_ROOT / "BATT_consolidated_composition.xlsx"
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from src.params_schema import current  # noqa: E402
+
+PARAMS = current()
+COMPOSITION_FILE = PROJECT_ROOT / PARAMS.scope.composition_file_name
 
 # The columns the workbook is expected to have. Checked, not assumed: a renamed
 # or dropped column should fail here, loudly, and not halfway through a model run.
@@ -91,6 +97,8 @@ def describe(composition: "pandas.DataFrame") -> None:  # noqa: F821
 
 def main() -> None:
     check_packages()
+    print(f"\nParameters  : src/params_schema.py -- {len(PARAMS.sheet_names())} BEV "
+          f"sheet(s) in scope: {', '.join(PARAMS.sheet_names())}")
     describe(load_composition())
     print("\nEnvironment OK.")
 
