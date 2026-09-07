@@ -1,0 +1,24 @@
+{
+  // Positron / VS Code pick up the project venv automatically from this path.
+  // Recreate it with:
+  //   ~/.pyenv/versions/3.14.4/bin/python3 -m venv .venv
+  //   ./.venv/bin/pip install -r requirements.txt
+  "python.defaultInterpreterPath": "${workspaceFolder}/.venv/bin/python",
+
+  // Activate .venv automatically in every terminal Positron opens, so that
+  // plain `python` and `pip` are the project's, not the system's.
+  // activateEnvInCurrentTerminal also applies it to a terminal already open.
+  "python.terminal.activateEnvironment": true,
+  "python.terminal.activateEnvInCurrentTerminal": true,
+
+  // Run scripts and the console from the project root, so relative paths to
+  // BATT_consolidated_composition.xlsx resolve the same way everywhere.
+  "python.terminal.executeInFileDir": false,
+  "jupyter.notebookFileRoot": "${workspaceFolder}",
+
+  // Make `import src....` resolve for the language server once there is a src/.
+  "python.analysis.extraPaths": ["${workspaceFolder}"],
+
+  "files.trimTrailingWhitespace": true,
+  "files.insertFinalNewline": true
+}

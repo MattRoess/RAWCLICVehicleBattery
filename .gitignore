@@ -1,0 +1,26 @@
+### PYTHON & ENVIRONMENT
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.venv/
+.env
+
+### POSITRON / JUPYTER
+.ipynb_checkpoints/
+.positron/
+
+### SYSTEM FILES
+.DS_Store
+Thumbs.db
+
+### DATA
+# Same rule as the sibling projects: no data file goes to GitHub. The workbook
+# is handed to the stock-and-flow model directly, not through the repository.
+# A fresh clone gets the CODE ONLY and cannot run until the workbook is
+# supplied separately (iCloud, shared drive, however it is distributed).
+*.xlsx
+*.csv
+*.pkl
+*.npy
+*.png

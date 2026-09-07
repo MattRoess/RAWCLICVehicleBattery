@@ -1,0 +1,25 @@
+# Vehicle-battery composition dependencies. Python 3.14.4, no conda.
+#
+# Setup (from the project root):
+#   ~/.pyenv/versions/3.14.4/bin/python3 -m venv .venv
+#   ./.venv/bin/pip install -r requirements.txt
+#
+# Then select .venv as the interpreter in Positron (it is already the default --
+# see .vscode/settings.json).
+#
+# Versions are pinned. This family of models is sensitive to pandas behaviour
+# changes -- copy-on-write and the removal of legacy APIs both altered results
+# before -- so an unpinned upgrade is not a free upgrade.
+
+pandas==3.0.5
+numpy==2.5.3
+scipy==1.18.1
+
+# Reading BATT_consolidated_composition.xlsx and writing any Excel output.
+openpyxl==3.1.5
+
+# Figures.
+matplotlib==3.11.1
+
+# Required by Positron to start a Python console or run a notebook cell.
+ipykernel==7.3.0
