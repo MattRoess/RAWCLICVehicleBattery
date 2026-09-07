@@ -357,6 +357,80 @@ class CapacityFigureParams:
     totals_figure_size_in: tuple[float, float] = (11.0, 7.5)
 
 
+@dataclass
+class EVDetailsParams:
+    """The EV-database vehicle table: segment and battery capacity over time."""
+
+    # The scraped vehicle table, inside paths.input_dir. One row per model
+    # variant, ~144 columns. Incomplete and still growing.
+    # SAFE TO CHANGE: yes, when a newer scrape arrives.
+    ev_details_file_name: str = "EV_details.csv"
+
+    # WHICH CAPACITY. 'useable' is what the car will actually deliver;
+    # 'nominal' is the pack's gross figure. They differ by about 6% (median
+    # useable/nominal = 0.944), so the choice moves every mass derived from it.
+    # The composition workbook is in kg per kWh without saying WHICH kWh, which
+    # is a question worth settling before these two are joined up.
+    # SAFE TO CHANGE: yes.
+    capacity_basis: str = "useable"
+
+    # WHICH COUNTRY'S AVAILABILITY DATES. The file carries United Kingdom, The
+    # Netherlands and Germany for every model. 'Germany' is the default as the
+    # largest of the three European markets; 'any' takes the earliest start and
+    # latest end across all three.
+    # SAFE TO CHANGE: yes -- 'Germany', 'The Netherlands', 'United Kingdom', 'any'.
+    availability_country: str = "Germany"
+
+    # A model counts in a year if its availability window OVERLAPS that year at
+    # all, rather than only the year it launched. That makes the series "what
+    # was on sale then", which is what a fleet-composition question needs.
+    # Set False to count a model only in its introduction year instead.
+    # SAFE TO CHANGE: yes, but the two answer different questions.
+    count_every_year_on_sale: bool = True
+
+    # 'Expected MON YYYY' rows are announced, not yet on sale (47 of 3,948
+    # entries). Including them extends the series into 2026-2027 with models
+    # that may not arrive.
+    # SAFE TO CHANGE: yes.
+    include_expected: bool = True
+
+    # The years plotted. Before 2015 there are too few models for a median to
+    # mean anything; the upper end runs past today because the file carries
+    # announced models.
+    # SAFE TO CHANGE: yes.
+    first_year: int = 2015
+    last_year: int = 2026
+
+    # A segment-year with fewer models than this is dropped rather than drawn:
+    # a median of two cars is a coincidence, not a trend.
+    # SAFE TO CHANGE: yes. Below 3 the lines get noisy.
+    min_models_per_year: int = 3
+
+    # The segments drawn, in two panels -- the file also carries G, I and
+    # 'N - Passenger Van', which have no entry in the stock-and-flow model's
+    # battery_size_map and are left out of the comparison for that reason.
+    # SAFE TO CHANGE: yes.
+    car_segments: tuple[str, ...] = ("A", "B", "C", "D", "E", "F")
+    jellybean_segments: tuple[str, ...] = ("JA", "JB", "JC", "JD", "JE", "JF")
+
+    # RAWCLICStockAndFlow's params.materials.battery_size_map, copied here to be
+    # compared against what the vehicles actually carry. It is NOT read from
+    # that project -- this is a written-down copy, and if the model changes its
+    # map this has to be updated by hand.
+    # SAFE TO CHANGE: yes, to match whatever the stock-flow model currently sets.
+    reference_battery_size_map: dict[str, float] = field(default_factory=lambda: {
+        "A": 25.0, "B": 45.0, "C": 60.0, "D": 80.0, "E": 80.0, "F": 100.0,
+        "JA": 25.0, "JB": 45.0, "JC": 60.0, "JD": 80.0, "JE": 80.0, "JF": 100.0,
+    })
+
+    # The figure, in paths.output_dir.
+    # SAFE TO CHANGE: yes. Keep the .png suffix.
+    capacity_over_time_file_name: str = "bev_capacity_by_segment_over_time.png"
+
+    # SAFE TO CHANGE: yes.
+    capacity_over_time_figure_size_in: tuple[float, float] = (16.0, 6.5)
+
+
 # ======================================================================
 #  END OF SETTINGS.  Below here is plumbing.
 # ======================================================================
@@ -365,7 +439,8 @@ class CapacityFigureParams:
 class Params:
     """Every setting, in one object."""
 
-    SECTIONS = ("paths", "scope", "drawing", "interpolation", "monte_carlo", "capacity_figure")
+    SECTIONS = ("paths", "scope", "drawing", "interpolation", "monte_carlo", "capacity_figure",
+                "ev_details")
 
     paths: PathParams = field(default_factory=PathParams)
     scope: ScopeParams = field(default_factory=ScopeParams)
@@ -373,6 +448,7 @@ class Params:
     interpolation: InterpolationParams = field(default_factory=InterpolationParams)
     monte_carlo: MonteCarloParams = field(default_factory=MonteCarloParams)
     capacity_figure: CapacityFigureParams = field(default_factory=CapacityFigureParams)
+    ev_details: EVDetailsParams = field(default_factory=EVDetailsParams)
 
     def sheet_names(self) -> list[str]:
         """The workbook sheets in scope, in the order the capacities are listed."""
@@ -383,6 +459,11 @@ class Params:
         """The workbook's full path, assembled in one place."""
         from pathlib import Path
         return Path(project_root) / self.paths.input_dir / self.scope.composition_file_name
+
+    def ev_details_path(self, project_root) -> "Path":
+        """The EV-database table's full path."""
+        from pathlib import Path
+        return Path(project_root) / self.paths.input_dir / self.ev_details.ev_details_file_name
 
     def output_path(self, project_root, file_name: str) -> "Path":
         """Where a figure goes, with the folder created if it is not there yet."""
@@ -534,6 +615,40 @@ class Params:
         if figure.plot_points < 2:
             raise ParameterError(
                 f"capacity_figure.plot_points must be at least 2: {figure.plot_points}")
+
+        ev = self.ev_details
+        if ev.capacity_basis not in ("useable", "nominal"):
+            raise ParameterError(
+                f"ev_details.capacity_basis must be 'useable' or 'nominal': "
+                f"{ev.capacity_basis!r}")
+        known_countries = ("Germany", "The Netherlands", "United Kingdom", "any")
+        if ev.availability_country not in known_countries:
+            raise ParameterError(
+                f"ev_details.availability_country must be one of {known_countries}: "
+                f"{ev.availability_country!r}")
+        if ev.first_year >= ev.last_year:
+            raise ParameterError(
+                f"ev_details.first_year ({ev.first_year}) must be below last_year "
+                f"({ev.last_year}).")
+        if ev.min_models_per_year < 1:
+            raise ParameterError(
+                f"ev_details.min_models_per_year must be at least 1: "
+                f"{ev.min_models_per_year}")
+        if not ev.capacity_over_time_file_name.endswith(".png"):
+            raise ParameterError(
+                "ev_details.capacity_over_time_file_name must end in '.png': "
+                f"{ev.capacity_over_time_file_name!r}")
+        overlapping = set(ev.car_segments) & set(ev.jellybean_segments)
+        if overlapping:
+            raise ParameterError(
+                f"a segment is listed in both ev_details.car_segments and "
+                f"jellybean_segments: {sorted(overlapping)}")
+        unmapped = sorted((set(ev.car_segments) | set(ev.jellybean_segments))
+                          - set(ev.reference_battery_size_map))
+        if unmapped:
+            raise ParameterError(
+                f"no ev_details.reference_battery_size_map entry for {unmapped} -- "
+                "the comparison panel would have nothing to compare those against.")
 
 
 def current() -> Params:

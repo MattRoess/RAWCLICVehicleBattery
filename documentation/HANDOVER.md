@@ -1,0 +1,237 @@
+# Handover — RAWCLICVehicleBattery
+
+Written 2026-09-07. State verified against the repository, not remembered:
+every command below was run, and every claim about what does or does not exist
+was checked with `git`.
+
+---
+
+## 1. Where things stand
+
+Repository: <https://github.com/MattRoess/RAWCLICVehicleBattery>, public, branch
+`main`, tracking `origin/main`.
+
+| commit | what it did | pushed |
+|---|---|---|
+| `3ee3bba` | Composition at any capacity, with the Monte Carlo | yes |
+| `f96951a` | Every setting moved into a parameter file; SVG output dropped | yes |
+| `27a2e59` | The product-structure drawing | yes |
+| `c513524` | Project set up for Positron | yes |
+
+**One uncommitted change is in the working tree**: `src/params_schema.py` has a
+new `ev_details` section (13 parameters) whose code has NOT been written yet.
+See §5 — this is the one loose end, and it is loose on purpose rather than by
+accident.
+
+Nothing under `data/` is tracked, and nothing ever should be. `git ls-files`
+returns code and config only.
+
+---
+
+## 2. What runs today
+
+```bash
+cd "/Users/rm/Library/Mobile Documents/com~apple~CloudDocs/Documents/GitHub/RAWCLICVehicleBattery"
+./.venv/bin/python 00_parameters.py                 # always first — regenerates and VALIDATES
+./.venv/bin/python 99_check_environment.py          # smoke test
+./.venv/bin/python 01_draw_battery_structure.py     # what a battery is made of
+./.venv/bin/python 02_composition_by_capacity.py    # how much of it, at any capacity
+```
+
+All four were run and pass. Python 3.14.4 in `.venv`, pinned in
+`requirements.txt`. Open the folder in Positron and the interpreter is already
+selected (`.vscode/settings.json`).
+
+| file | role |
+|---|---|
+| `src/params_schema.py` | **the file you edit.** 58 parameters, each with its own comment |
+| `src/params_io.py` | writes `params.xlsx` (a report — nothing reads it) |
+| `src/composition.py` | the model: composition at any capacity, with uncertainty |
+| `data/raw/` | `BATT_consolidated_composition.xlsx`, `EV_details.csv` — supplied separately, never in git |
+| `data/processed/` | the three figures, all regenerable |
+
+### The public function
+
+```python
+from src.composition import CompositionModel
+from src.params_schema import current
+
+model = CompositionModel(current())
+model.weights_at(150.0, chemistry="battLiNMC_midNi", level="component")
+```
+
+Any capacity in 10–200 kWh, any of the seven chemistries, at `component`,
+`material` or `element` level. Returns mass in kg, kg/kWh, the Monte Carlo
+percentile band, and an `extrapolated` flag. It refuses outside that range
+rather than returning a number nobody should trust.
+
+---
+
+## 3. The data
+
+**`BATT_consolidated_composition.xlsx`** — 7 sheets, 1,395 rows, all kg/kWh.
+Five BEV sizes (25, 45, 60, 80, 100 kWh) are in scope; the HEV and PHEV sheets
+are deliberately not. Twelve components on two branches: eight that exist once
+per cell chemistry (7 chemistries), four that belong to the pack
+(`Layer 1 = battPackXEV`) and are the same whatever chemistry is inside.
+`parameterCode` gives the level: `c-p` component, `m-c` material, `e-c` element.
+
+**`EV_details.csv`** — the EV-database scrape, 1,326 model variants × 144
+columns, incomplete and still growing. Profiled but not yet used by any code.
+See §5 and §6.
+
+---
+
+## 4. Decisions made, and why
+
+These are the ones that would be expensive to rediscover.
+
+**Interpolation is on MASS, not kg/kWh.** A part whose mass does not depend on
+capacity — `currentCollectorAnode` on high-Ni is 21.4 kg at 25 kWh and 21.8 kg
+at 100 — has an intensity that falls 0.86 → 0.22 kg/kWh purely because the
+denominator grew. Interpolating that hyperbola mixes fixed-mass parts up with
+the ones that really scale. Intensity is multiplied up to kilograms,
+interpolated there, and divided back out. Verified: the five anchors come back
+exactly, to 3×10⁻¹⁴ kg.
+
+**Extrapolation is linear, always.** Whatever `interpolation_method` says. A
+cubic continued past its last knot diverges, and at 150 kWh — half again beyond
+the largest sheet — that is how a figure ends up with a negative cathode. Every
+extrapolated row is flagged and the figures shade the region.
+
+**⚠️ The ±10% band is a convention, not a measurement.** Every non-zero row of
+the workbook has `min_value = 0.9 × Value` and `max_value = 1.1 × Value` — all
+805 of them, whether the value was consolidated from 1 source or from 21, with
+`DQS = 2` throughout. The Monte Carlo propagates that faithfully, so the band it
+produces is the convention carried through the arithmetic and **not** evidence
+about how well any of these numbers is known. A narrow band means the rule was
+narrow. `_factor_bounds` in `src/composition.py` checks that proportionality
+holds rather than assuming it, and raises if a future workbook carries a real
+per-capacity range.
+
+**Series are drawn independently of each other.** So the whole-pack band
+(±3.4%) is narrower than any single component's ±10%. If component errors are
+in fact correlated, that total band is too tight. No parameter exposes
+cross-series correlation yet.
+
+**⚠️ At element level the components do not add up.** `batteryCellCasing` and
+`batteryCellSeparator` have no `e-c` rows at all. A 150 kWh NMC battery
+accounts for 626 kg at element level against 684 kg at component level — 8%
+missing, silently, unless you look. `02_composition_by_capacity.py` prints this
+whenever `--level element` is used. This is the strongest argument for not
+reading the product at element level alone.
+
+**`batteryPackCellTerminals` is named for the pack but sits under the cell
+chemistry** in `Layer 1`, so it scales with the chemistry mix, not with the
+pack. Anything splitting the two branches by the component's *name* will get
+this one wrong; split on `Layer 1` instead.
+
+---
+
+## 5. The loose end: `ev_details`
+
+`src/params_schema.py` has an uncommitted `ev_details` section — 13 parameters
+covering the CSV's file name, which capacity basis to use, which country's
+availability dates, the year range, the segments, and a copy of the
+stock-and-flow `battery_size_map` to compare against. It validates and
+`00_parameters.py` regenerates cleanly with it.
+
+**The code those parameters configure does not exist.** There is no
+`src/ev_details.py` and no `03_…` script. The request being worked when the
+session ended was: *segment and battery capacity over time*, and only that —
+the rest of the CSV is for later.
+
+So the next person either writes that code, or reverts the section. It is not a
+half-broken state — nothing imports it — but it is a promise the repository does
+not yet keep.
+
+### What the profiling already established
+
+Run, verified, not yet in any script:
+
+- **Availability parses cleanly.** `availability_json` holds United Kingdom, The
+  Netherlands and Germany for all 1,316 models, in six patterns only:
+  `MON YYYY - MON YYYY` (1,846), `Since MON YYYY` (1,544), `Not Available`
+  (501), `Expected MON YYYY` (47), `Not available to order` (5), `MON YYYY` (5).
+  First-availability year spans 2011–2027 and is filled for 99% of rows; 617 of
+  1,326 models have no end date, i.e. are still on sale.
+- **The segment codes match the stock-and-flow model's exactly** — A–F and
+  JA–JF — plus `G`, `I` and `N - Passenger Van`, which have no entry in
+  `battery_size_map`.
+- **⚠️ The empirical capacities disagree with `battery_size_map`.** Median
+  useable kWh against the map:
+
+  | segment | map | median | n |
+  |---|---|---|---|
+  | A | 25 | 19.0 | 32 |
+  | B | 45 | 41.0 | 79 |
+  | C | 60 | 58.0 | 108 |
+  | D | 80 | 77.0 | 104 |
+  | E | 80 | 86.0 | 86 |
+  | F | 100 | 96.5 | 136 |
+  | JA | 25 | 42.5 | 2 |
+  | JB | 45 | 50.8 | 105 |
+  | JC | 60 | 74.2 | 284 |
+  | JD | 80 | 83.6 | 146 |
+  | JE | 80 | 94.8 | 65 |
+  | JF | 100 | 96.0 | 57 |
+
+  `JC` is the big one: 284 models, median 74 kWh against a map value of 60 —
+  24% low, in the most populous segment. `JE` is 19% low. These feed straight
+  into every battery mass the stock-and-flow model computes.
+- **Capacity range**: median 75 kWh useable, 95th percentile 106.5, maximum 141.
+  98 models above 100 kWh, only 5 above 120. So extrapolating to 150 kWh covers
+  the real fleet rather than inventing a hypothetical one.
+- **⚠️ Useable vs nominal capacity differ by ~6%** (median ratio 0.944). The
+  composition workbook is in kg per kWh *without stating which kWh*. That
+  question should be settled before the two files are joined, because it moves
+  every derived mass by 6%.
+
+---
+
+## 6. Open questions, and who they are for
+
+1. **Which kWh does the workbook mean** — useable or nominal? Nobody here can
+   answer it from the file. It is a 6% error in every mass if guessed wrong.
+2. **Does mass really keep rising linearly above 100 kWh?** The straight line
+   implies specific energy climbing to 219 Wh/kg at 150 kWh and 232 at 200. That
+   is the weakest part of the extrapolation. A view on how pack mass actually
+   scales belongs in the model rather than in a straight line.
+3. **`battery_size_map`** — the table in §5 says it is wrong for several
+   segments. Updating it is a change to RAWCLICStockAndFlow, not to this
+   project, and it changes published results.
+
+### Blocked in RAWCLICStockAndFlow
+
+`code/04_04_batteries.py` still cannot run, for reasons that are not this
+project's to fix:
+
+- It wants `materials.battery_composition_parameter_code = "e-m"`, which **does
+  not exist** in this workbook. The file offers `c-p`, `m-c` and `e-c`. Only
+  `e-c` is complete; `m-c` covers just casing, separator and electrolyte, and
+  with no `Layer 3` column it does not name its material. See §4 on the element
+  gap before choosing.
+- It expects one sheet named `BATT_EV_consolidated_inputForRM` and a `Layer 3`
+  column. This workbook has seven size sheets and no `Layer 3`. A new loader is
+  needed.
+- `BATTKey_xEV_shares_final.xlsx`, the chemistry market shares, **is not
+  anywhere on disk**. `EV_details.csv` carries `battery_cathode_material` and
+  could be made to yield those shares by year — but by model count, not by
+  registrations, so it would need weighting against the EEA data the
+  stock-and-flow model already holds.
+
+### Outstanding elsewhere
+
+A repository audit on 2026-09-07 found data files in public repos, none of them
+put there by this work and none yet cleaned up:
+
+- `VehicleComposition` (public): 24 workbooks and a PDF, ~123 MB, including the
+  JRC RMIS files.
+- `RAWCLICRecoveryModel` (public): 35 csv/xlsx, ~1.4 MB.
+- `RAWCLICVehicleElectronics` (public): 5 workbooks under `Consolidation/` — its
+  `.gitignore` excludes `Data/`, and these sit outside it.
+- `RAWCLICVehicleComposition` (private): `listing.csv` remains in history,
+  deleted from the tree in commit `f37d8f3`.
+
+Removing any of them means rewriting history and force-pushing, and
+`git filter-repo` is not installed on this machine.
