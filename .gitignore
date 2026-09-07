@@ -24,3 +24,6 @@ Thumbs.db
 *.pkl
 *.npy
 *.png
+
+# Generated figures (regenerate with 01_draw_battery_structure.py)
+*.svg
