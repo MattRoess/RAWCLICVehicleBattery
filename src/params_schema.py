@@ -491,6 +491,47 @@ class EVDetailsParams:
     # SAFE TO CHANGE: yes -- presentation only.
     show_model_scatter: bool = True
 
+    # HOW THE CATHODE MATERIAL IS GROUPED. The file states 11 different values;
+    # these are the groups they are collapsed into.
+    #   NMC_middle  NMC532, NMC622
+    #   NMC_high    NMC712, NMC721, NMC811, and plain 'NMC'/'NCM'
+    # Plain 'NMC' carries no grade and is 57% of the 2026 models, so where it
+    # goes decides most of the split. It goes to NMC_high by instruction --
+    # which is the right guess for recent years, where 100 of 116 graded NMC
+    # models are 811, and the wrong one for 2018-2021, where 622 dominated.
+    # Treat NMC_high before about 2022 as "NMC of unknown grade", not as high-Ni.
+    # SAFE TO CHANGE: yes.
+    chemistry_groups: dict[str, tuple[str, ...]] = field(default_factory=lambda: {
+        "LFP": ("LFP",),
+        "NCA": ("NCA",),
+        "NMC_middle": ("NMC532", "NMC622"),
+        "NMC_high": ("NMC712", "NMC721", "NMC811", "NMC", "NCM"),
+    })
+
+    # NOT COVERED BY THE GROUPS ABOVE, and deliberately left out rather than
+    # forced into one: 'NMC333' (5 models, all before 2019 -- graded, so not
+    # "ungraded", but neither 532/622 nor 712/721/811) and 'LFP & NMC' (6
+    # models, either-or per variant). Together 11 of 1,244 models. They are
+    # reported on every run instead of disappearing quietly.
+    # SAFE TO CHANGE: yes -- add them to a group above if you decide where they
+    # belong; this list only silences the report.
+    chemistry_values_left_out: tuple[str, ...] = ("NMC333", "LFP & NMC")
+
+    # A segment-and-chemistry combination needs at least this many distinct
+    # models before it is tabulated or drawn. Below it, a median is one
+    # manufacturer's product plan rather than a market.
+    # SAFE TO CHANGE: yes.
+    min_models_per_chemistry_cell: int = 5
+
+    # Colour per chemistry group, used across every chemistry figure.
+    # SAFE TO CHANGE: yes -- presentation only.
+    chemistry_colours: dict[str, str] = field(default_factory=lambda: {
+        "LFP": "#2f8f5b",
+        "NCA": "#b07aa1",
+        "NMC_middle": "#e08214",
+        "NMC_high": "#1f5f8b",
+    })
+
     # The figures, in paths.output_dir. '{basis}' is filled with 'nominal' or
     # 'useable', so the two cannot overwrite each other or be mistaken for one
     # another later.
@@ -499,6 +540,14 @@ class EVDetailsParams:
 
     # SAFE TO CHANGE: yes.
     capacity_over_time_figure_size_in: tuple[float, float] = (17.0, 8.5)
+
+    # Capacity by segment AND chemistry, in paths.output_dir. '{basis}' is
+    # filled as above.
+    # SAFE TO CHANGE: yes. Keep '{basis}' and the .png suffix.
+    capacity_by_chemistry_file_name: str = "bev_capacity_by_segment_and_chemistry_{basis}.png"
+
+    # SAFE TO CHANGE: yes.
+    capacity_by_chemistry_figure_size_in: tuple[float, float] = (17.0, 8.5)
 
 
 # ======================================================================
@@ -732,6 +781,33 @@ class Params:
                 "ev_details.capacity_over_time_file_name must contain '{basis}', "
                 "or the nominal and useable figures overwrite each other: "
                 f"{ev.capacity_over_time_file_name!r}")
+        if not ev.chemistry_groups:
+            raise ParameterError("ev_details.chemistry_groups is empty.")
+        seen: dict[str, str] = {}
+        for group, values in ev.chemistry_groups.items():
+            for value in values:
+                if value in seen:
+                    raise ParameterError(
+                        f"cathode value {value!r} is in two chemistry groups, "
+                        f"{seen[value]!r} and {group!r} -- a model would be counted twice.")
+                seen[value] = group
+        clash = sorted(set(ev.chemistry_values_left_out) & set(seen))
+        if clash:
+            raise ParameterError(
+                f"{clash} are both grouped and listed in chemistry_values_left_out. "
+                "Being left out is the opposite of being grouped -- pick one.")
+        without_colour = sorted(set(ev.chemistry_groups) - set(ev.chemistry_colours))
+        if without_colour:
+            raise ParameterError(
+                f"no ev_details.chemistry_colours entry for {without_colour}.")
+        if ev.min_models_per_chemistry_cell < 1:
+            raise ParameterError(
+                "ev_details.min_models_per_chemistry_cell must be at least 1: "
+                f"{ev.min_models_per_chemistry_cell}")
+        if "{basis}" not in ev.capacity_by_chemistry_file_name:
+            raise ParameterError(
+                "ev_details.capacity_by_chemistry_file_name must contain '{basis}': "
+                f"{ev.capacity_by_chemistry_file_name!r}")
         if not ev.capacity_bases_to_plot:
             raise ParameterError("ev_details.capacity_bases_to_plot is empty.")
         unknown_bases = sorted(set(ev.capacity_bases_to_plot) - {"nominal", "useable"})

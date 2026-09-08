@@ -45,6 +45,7 @@ if str(PROJECT_ROOT) not in sys.path:
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
+from matplotlib.ticker import MaxNLocator  # noqa: E402
 import numpy as np  # noqa: E402
 import pandas as pd  # noqa: E402
 
@@ -115,6 +116,7 @@ def draw(ev: EVDetails, segments: list[str]):
 
         ax.set_title(f"{segment}   ({curve.n_models} models)", fontsize=9,
                      loc="left", color=INK)
+        ax.xaxis.set_major_locator(MaxNLocator(integer=True, nbins=4))
         ax.grid(True, linestyle="--", alpha=0.3)
         ax.spines["top"].set_visible(False)
         ax.spines["right"].set_visible(False)

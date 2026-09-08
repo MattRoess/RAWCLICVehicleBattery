@@ -74,6 +74,7 @@ class SegmentCurve:
     """One segment's answer: the curve, both bands, and what it was fitted to."""
 
     segment: str
+    chemistry: str | None      # None = every model in the segment
     years: np.ndarray            # the grid the curve is drawn on
     central: np.ndarray          # the smoothed capacity, kWh
     spread_low: np.ndarray       # market spread, lower percentile
@@ -146,7 +147,9 @@ class EVDetails:
             # stock-and-flow model also uses.
             "segment": raw["miscellaneous_segment"].astype(str).str.split(" - ").str[0],
             "capacity_kwh": raw[column].map(_first_number),
+            "cathode": raw["battery_cathode_material"],
         })
+        frame["chemistry"] = frame["cathode"].map(self._chemistry_lookup())
 
         windows = [self._model_window(value) for value in raw["availability_json"]]
         frame["first_year"] = [start for start, _ in windows]
@@ -157,7 +160,42 @@ class EVDetails:
         if dropped:
             print(f"[ev_details] {dropped} of {len(frame)} rows dropped: no capacity "
                   f"or no availability date for {ev.availability_country}.")
+        self._report_chemistry_coverage(usable)
         return usable.reset_index(drop=True)
+
+    def _chemistry_lookup(self) -> dict[str, str]:
+        """Cathode value -> group. The parameters guarantee no value is in two."""
+        return {value: group
+                for group, values in self.params.ev_details.chemistry_groups.items()
+                for value in values}
+
+    def _report_chemistry_coverage(self, frame: pd.DataFrame) -> None:
+        """
+        Say on every run what the grouping does NOT cover.
+
+        A model with an ungrouped or absent cathode is simply missing from every
+        chemistry result. That is defensible, but only if it is visible -- an
+        unexplained 15% shortfall found later is far more expensive than a line
+        of output now.
+        """
+        ev = self.params.ev_details
+        ungrouped = frame[frame.chemistry.isna() & frame.cathode.notna()]
+        if len(ungrouped):
+            counts = ungrouped.cathode.value_counts()
+            unexpected = [value for value in counts.index
+                          if value not in ev.chemistry_values_left_out]
+            listed = ", ".join(f"{value} ({count})" for value, count in counts.items())
+            print(f"[ev_details] {len(ungrouped)} models have a cathode value in no "
+                  f"chemistry group: {listed}.")
+            if unexpected:
+                print(f"[ev_details] ...of which {unexpected} are NOT in "
+                      "ev_details.chemistry_values_left_out, so this is new and worth "
+                      "a look rather than an accepted omission.")
+        missing = int(frame.cathode.isna().sum())
+        if missing:
+            print(f"[ev_details] {missing} of {len(frame)} models state no cathode "
+                  f"material at all ({missing / len(frame):.0%}) -- absent from every "
+                  "chemistry result.")
 
     def _model_window(self, availability_json) -> tuple[float, float]:
         """One model's window, from the chosen country or across all of them."""
@@ -201,8 +239,9 @@ class EVDetails:
             for year in years:
                 if ev.first_year <= year <= ev.last_year:
                     rows.append((model.car_id, model.name, model.segment,
-                                 float(year), model.capacity_kwh))
-        panel = pd.DataFrame(rows, columns=["car_id", "name", "segment", "year", "capacity_kwh"])
+                                 float(year), model.capacity_kwh, model.chemistry))
+        panel = pd.DataFrame(rows, columns=["car_id", "name", "segment", "year",
+                                            "capacity_kwh", "chemistry"])
         if panel.empty:
             raise EVDetailsError(
                 "no model-years survived the filters -- check ev_details.first_year, "
@@ -252,12 +291,21 @@ class EVDetails:
         cumulative /= weights.sum()
         return float(np.interp(q / 100.0, cumulative, values))
 
-    def curve(self, segment: str) -> SegmentCurve:
-        """The smoothed capacity curve for one segment, with both bands."""
+    def curve(self, segment: str, chemistry: str | None = None) -> SegmentCurve:
+        """
+        The smoothed capacity curve for one segment, with both bands.
+
+        `chemistry` restricts it to one group; None uses every model in the
+        segment whatever its cathode, including those stating none.
+        """
         ev = self.params.ev_details
         points = self.panel[self.panel.segment == segment]
+        if chemistry is not None:
+            points = points[points.chemistry == chemistry]
         if points.empty:
-            raise EVDetailsError(f"no models in segment {segment!r}.")
+            raise EVDetailsError(
+                f"no models in segment {segment!r}"
+                + (f" with chemistry {chemistry!r}." if chemistry else "."))
 
         grid = np.arange(ev.first_year, ev.last_year + 1, dtype=float)
         years = points.year.to_numpy(dtype=float)
@@ -281,7 +329,7 @@ class EVDetails:
         band_low, band_high = self._bootstrap_band(points, grid, thin)
 
         return SegmentCurve(
-            segment=segment, years=grid, central=central,
+            segment=segment, chemistry=chemistry, years=grid, central=central,
             spread_low=spread_low, spread_high=spread_high,
             band_low=band_low, band_high=band_high, effective_n=effective,
             points=points, n_models=int(points.car_id.nunique()),
@@ -319,3 +367,27 @@ class EVDetails:
     def curves(self, segments) -> dict[str, SegmentCurve]:
         return {segment: self.curve(segment) for segment in segments
                 if (self.panel.segment == segment).any()}
+
+    def chemistry_cells(self, segments) -> pd.DataFrame:
+        """
+        Distinct models per segment and chemistry -- what decides which cells
+        are populated enough to tabulate or draw.
+
+        Models, not model-years: "at least five batteries of that chemistry"
+        means five different cars, not one car counted once per year on sale.
+        """
+        panel = self.panel[self.panel.segment.isin(segments) & self.panel.chemistry.notna()]
+        return (panel.groupby(["segment", "chemistry"])["car_id"].nunique()
+                .rename("models").reset_index())
+
+    def chemistry_table(self, segments, statistic: str = "median") -> pd.DataFrame:
+        """Capacity by segment and chemistry, blanked below the model threshold."""
+        ev = self.params.ev_details
+        panel = self.panel[self.panel.segment.isin(segments) & self.panel.chemistry.notna()]
+        # One row per model, so a car on sale eight years is not eight batteries.
+        per_model = panel.drop_duplicates("car_id")
+        values = per_model.pivot_table(index="segment", columns="chemistry",
+                                       values="capacity_kwh", aggfunc=statistic)
+        counts = per_model.pivot_table(index="segment", columns="chemistry",
+                                       values="capacity_kwh", aggfunc="count")
+        return values.where(counts >= ev.min_models_per_chemistry_cell)

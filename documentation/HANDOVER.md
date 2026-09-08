@@ -188,6 +188,54 @@ many variants is still not a segment with many cars on the road, so a
 sales-weighted version — using the EEA data the stock-and-flow model already
 holds — would be the way to turn this into a `battery_size_map` revision.
 
+### Chemistry split (`04_capacity_by_chemistry.py`)
+
+Grouping, set in `ev_details.chemistry_groups`: **LFP**, **NCA**,
+**NMC_middle** = NMC532/622, **NMC_high** = NMC712/721/811 *and every model
+stating only `NMC` with no grade*.
+
+**⚠️ That last clause decides most of the split** — 57% of 2026 models say only
+`NMC`. It is the right guess for recent years (100 of 116 graded NMC models in
+2026 are 811) and the wrong one for 2018–2021, when 622 dominated. Before about
+2022, read `NMC_high` as "NMC, grade unknown".
+
+Not covered by the rule and deliberately left out rather than forced into a
+group: `NMC333` (5 models, all pre-2019 — graded, so not "ungraded", but neither
+532/622 nor 712/721/811) and `LFP & NMC` (6 models, either-or per variant). A
+further 174 models (14%) state no cathode at all. All three are reported on
+every run.
+
+Median nominal kWh, cells with ≥5 distinct models:
+
+| seg | LFP | NCA | NMC_middle | NMC_high |
+|---|---|---|---|---|
+| A | – | – | – | 26.8 |
+| B | 41.0 | – | 50.0 | 51.0 |
+| C | 56.2 | – | 50.0 | 63.1 |
+| D | 64.0 | 78.8 | – | 82.0 |
+| E | – | – | – | 98.0 |
+| F | – | 100.0 | – | 105.0 |
+| JB | 50.0 | – | 50.0 | 58.3 |
+| JC | 62.0 | – | – | 82.0 |
+| JD | 75.8 | – | 90.0 | 92.0 |
+| JE | 90.6 | – | 95.0 | 105.5 |
+| JF | – | 100.0 | – | 110.3 |
+
+**LFP is 15–25% smaller than NMC_high in every segment where both appear**, and
+its share of models on sale went 0% → 18% between 2020 and 2026. So the
+single-curve segment figure in `03` is a blend of two populations with different
+means and a shifting mix — some of the flattening after 2023 is mix, not
+technology. That is what this split is for.
+
+On NCA: it **is** in the composition workbook (`battLiNCA_subsub`, a real NCA
+cathode signature — Ni 0.709, Co 0.133, Al 0.020 kg/kWh, no Mn). It is finished
+as a current chemistry — 26 models, only Tesla and Audi, 13.7% of models in 2019
+down to 0.6% in 2026, and only 2 of the 26 still have an open availability
+window. It stays relevant on the OUTFLOW side for a decade, since those
+2019–2023 cars are the ones now entering the ELV stream. Worth knowing:
+`battLiNCA_subsub` shares six of its eight cell-component values exactly with
+`battLiMFP_subsub`, so the two are not independent evidence.
+
 ### What the profiling established
 
 Run, verified, not yet in any script:
