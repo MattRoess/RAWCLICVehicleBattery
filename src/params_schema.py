@@ -786,6 +786,29 @@ class ExportParams:
     # SAFE TO CHANGE: yes.
     export_format: str = "csv"
 
+    # ⚠️ WHAT A COMPONENT IS MADE OF, WHERE THE WORKBOOK DOES NOT SAY.
+    #
+    # The workbook resolves batteryCellCasing at 'm-c' only, and with no Layer 3
+    # column it never names the material -- so the casing is one of the
+    # components that vanishes entirely at element level (100% of its own mass,
+    # ~0.08 kg/kWh). Stating the materials here puts the name back on rows that
+    # otherwise carry none.
+    #
+    # A share of None means: the material IS present, the SPLIT is not known.
+    # Those rows are written with the material named and the mass left empty,
+    # marked 'material_known_split_unknown'. Give real fractions -- they must sum
+    # to 1 -- and the component's mass is divided among them instead.
+    #
+    # NOTE that 'plastics' is a material, not an element: it will never appear at
+    # element level. Resolving the casing at element level needs the polymer
+    # broken into C/H/O, which nobody here has done, so the element-level gap for
+    # this component stays open even once the split is filled in.
+    # SAFE TO CHANGE: yes -- this is exactly the parameter to edit when the
+    # aluminium-to-plastics ratio is known.
+    component_material_overrides: dict[str, dict] = field(default_factory=lambda: {
+        "batteryCellCasing": {"Al": None, "plastics": None},
+    })
+
     # WRITE A FILE FOR THE CHEMISTRIES WITH NO COMPOSITION TOO -- sodium-ion and
     # bipolar solid-state -- with every mass left EMPTY and marked unknown,
     # rather than leaving them out. A missing file is easy to overlook
@@ -1237,6 +1260,26 @@ class Params:
                 f"'element': {unknown_levels}")
         if not ex.export_levels:
             raise ParameterError("export.export_levels is empty -- nothing to write.")
+        for component, materials in ex.component_material_overrides.items():
+            if not materials:
+                raise ParameterError(
+                    f"export.component_material_overrides[{component!r}] is empty.")
+            shares = [share for share in materials.values() if share is not None]
+            if shares and len(shares) != len(materials):
+                raise ParameterError(
+                    f"export.component_material_overrides[{component!r}] mixes known "
+                    f"and unknown shares: {materials}. Either every material has a "
+                    "fraction or none does -- a half-known split would be written as "
+                    "though the missing part did not exist.")
+            if shares and abs(sum(shares) - 1.0) > 1e-6:
+                raise ParameterError(
+                    f"export.component_material_overrides[{component!r}] shares must "
+                    f"sum to 1, not {sum(shares)}: {materials}")
+            if any(share is not None and not 0 <= share <= 1 for share in materials.values()):
+                raise ParameterError(
+                    f"export.component_material_overrides[{component!r}] shares must be "
+                    f"fractions in [0, 1]: {materials}")
+
         for chemistry, template in ex.unknown_chemistry_template.items():
             if chemistry not in sc.chemistries_without_composition:
                 raise ParameterError(

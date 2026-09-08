@@ -139,8 +139,52 @@ def build_rows(model: CompositionModel, params, capacities: pd.DataFrame,
     rows["chemistry"] = chemistry
     rows["composition_status"] = "from_workbook"
     rows["note"] = ""
-    keep = keep + ["composition_status", "note"]
-    return rows[["chemistry"] + [c for c in keep if c in rows.columns]]
+    rows["material"] = pd.NA
+    keep = keep + ["material", "composition_status", "note"]
+    rows = rows[["chemistry"] + [c for c in keep if c in rows.columns]]
+    return apply_material_overrides(rows, params)
+
+
+def apply_material_overrides(rows: pd.DataFrame, params) -> pd.DataFrame:
+    """
+    Name the materials the workbook leaves unnamed, at material level.
+
+    The workbook resolves batteryCellCasing at 'm-c' with no Layer 3 column, so
+    the row has a mass and no material. Where the split is known the mass is
+    divided; where only the materials are known the mass is dropped and the row
+    marked -- naming a material is not the same as knowing how much of it there
+    is, and writing the component's whole mass against one of them would be a
+    silent invention.
+    """
+    overrides = params.export.component_material_overrides
+    if not overrides:
+        return rows
+
+    material_rows = rows.level == "material"
+    keep, expanded = rows[~material_rows], []
+    for row in rows[material_rows].to_dict("records"):
+        materials = overrides.get(row["component"])
+        if not materials:
+            expanded.append(row)
+            continue
+        known_split = all(share is not None for share in materials.values())
+        for material, share in materials.items():
+            new = dict(row)
+            new["material"] = material
+            if known_split:
+                for column in [c for c in new if c.startswith("mass_") or c == "kg_per_kwh"]:
+                    if pd.notna(new[column]):
+                        new[column] = new[column] * share
+            else:
+                for column in [c for c in new if c.startswith("mass_") or c == "kg_per_kwh"]:
+                    new[column] = pd.NA
+                if new["composition_status"] == "from_workbook":
+                    new["composition_status"] = "material_known_split_unknown"
+                    new["note"] = (f"{'/'.join(materials)} — the workbook gives this "
+                                   "component's mass but never names its materials, and "
+                                   "the split between them is not known")
+            expanded.append(new)
+    return pd.concat([keep, pd.DataFrame(expanded)], ignore_index=True) if expanded else keep
 
 
 def build_unknown_rows(model: CompositionModel, params, capacities: pd.DataFrame,

@@ -390,6 +390,19 @@ The skeleton is a structural assumption and the only thing asserted about them
   needs no per-cell terminals). Collector elements left unknown: a Li-metal
   anode normally keeps its copper substrate, a Na one would not, and that is open.
 
+**Cell casing is aluminium and plastics** (`export.component_material_overrides`).
+The workbook resolves `batteryCellCasing` at `m-c` only and, with no `Layer 3`
+column, never names the material — so the material-level rows now carry `Al` and
+`plastics` by name. **The split between them is not known**, so those rows are
+written with the mass EMPTY and `composition_status =
+"material_known_split_unknown"`. Give the fraction in that parameter and every
+file divides the casing mass accordingly on the next run — it is a one-line edit.
+
+Two things that stay true even once the split is filled in: `plastics` is a
+material, not an element, so it will never appear at element level; and
+resolving the casing at element level needs the polymer broken into C/H/O, which
+nobody has done. The element-level gap for this component stays open.
+
 Outside the components each template explicitly claims (`assert_elements_for`),
 the element is written **`unknown`** rather than the base chemistry's. Borrowing
 a component list is not knowing what the cathode is made of, and a row reading
