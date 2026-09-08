@@ -786,6 +786,79 @@ class ExportParams:
     # SAFE TO CHANGE: yes.
     export_format: str = "csv"
 
+    # WRITE A FILE FOR THE CHEMISTRIES WITH NO COMPOSITION TOO -- sodium-ion and
+    # bipolar solid-state -- with every mass left EMPTY and marked unknown,
+    # rather than leaving them out. A missing file is easy to overlook
+    # downstream; a file full of blanks with a status column is not, and the
+    # stock-and-flow model can carry the chemistry through and see the gap
+    # arrive rather than silently dropping that share of the fleet.
+    # SAFE TO CHANGE: yes.
+    write_unknown_chemistries: bool = True
+
+    # ⚠️ THE ROW SKELETON FOR THOSE CHEMISTRIES IS A STRUCTURAL ASSUMPTION, and
+    # the ONLY thing asserted about them. No mass, no kg/kWh, no uncertainty is
+    # written -- those columns are empty and `composition_status` says why.
+    #
+    #   based_on            whose component list is borrowed, and nothing else
+    #   remove_components   components that chemistry does not have
+    #   element_swaps       PER COMPONENT: {component: {from: to}}. Scoped on
+    #                       purpose. A blanket Cu -> Al swap would also turn the
+    #                       pack cables aluminium, which is wrong -- the cables
+    #                       stay copper whatever the cell chemistry is. Copper
+    #                       against aluminium is exactly what differs between
+    #                       these battery types, and only on the collector.
+    #   assert_elements_for  the ONLY components whose element list is claimed.
+    #                       Everywhere else the element is written 'unknown',
+    #                       because borrowing a component list is not the same
+    #                       as knowing what the cathode is made of -- and a row
+    #                       saying 'Fe' for a sodium cathode would be a claim
+    #                       nobody made, empty mass or not.
+    #   note                what a reader has to know before using the row
+    #
+    # Sodium-ion: aluminium replaces copper as the anode current collector,
+    # because sodium does not alloy with aluminium at low potential. That single
+    # swap is roughly 0.4 kg Cu/kWh, 55-59% of the pack's copper, and it is the
+    # main reason to model sodium at all.
+    #
+    # Bipolar solid-state: the separator and the liquid electrolyte cease to
+    # exist, and stacking cells in series inside the pack removes the per-cell
+    # terminals. The anode is lithium or sodium metal rather than graphite --
+    # which of the two is undecided, so the anode element is left unknown rather
+    # than picked.
+    # SAFE TO CHANGE: yes, and it should be, as soon as real data exists -- at
+    # which point these chemistries belong in the workbook instead.
+    unknown_chemistry_template: dict[str, dict] = field(default_factory=lambda: {
+        "Na_ion": {
+            "based_on": "battLiFP_subsub",
+            "remove_components": (),
+            "element_swaps": {"currentCollectorAnode": {"Cu": "Al"}},
+            # The pack hardware is chemistry-independent, and the current
+            # collectors are the whole point of the sodium case. The cathode,
+            # anode and electrolyte are not claimed.
+            "assert_elements_for": ("currentCollectorAnode", "currentCollectorCathode",
+                                    "batteryPackCables", "batteryPackSupportFrame",
+                                    "batteryPackThermalConductor",
+                                    "batteryPackModuleEnclosuresAndCoolantManifolds"),
+            "note": ("structure assumed from LFP; Al replaces Cu as the anode current "
+                     "collector; cathode, anode and electrolyte elements are NOT known"),
+        },
+        "solid_state": {
+            "based_on": "battLiNMC_highNi",
+            "remove_components": ("batteryCellSeparator", "batteryCellElectrolyte",
+                                  "batteryPackCellTerminals"),
+            "element_swaps": {},
+            # Only the pack hardware. The current collectors are left unclaimed
+            # too: a lithium-metal anode normally keeps its copper substrate, a
+            # sodium one would not, and that choice is open.
+            "assert_elements_for": ("batteryPackCables", "batteryPackSupportFrame",
+                                    "batteryPackThermalConductor",
+                                    "batteryPackModuleEnclosuresAndCoolantManifolds"),
+            "note": ("bipolar: no separator, no liquid electrolyte, no per-cell "
+                     "terminals; anode is Li or Na metal, not graphite -- which one "
+                     "is undecided, so anode, cathode and collector elements are NOT known"),
+        },
+    })
+
 
 # ======================================================================
 #  END OF SETTINGS.  Below here is plumbing.
@@ -1164,6 +1237,28 @@ class Params:
                 f"'element': {unknown_levels}")
         if not ex.export_levels:
             raise ParameterError("export.export_levels is empty -- nothing to write.")
+        for chemistry, template in ex.unknown_chemistry_template.items():
+            if chemistry not in sc.chemistries_without_composition:
+                raise ParameterError(
+                    f"export.unknown_chemistry_template has an entry for {chemistry!r}, "
+                    "which is NOT in scenarios.chemistries_without_composition. If it "
+                    "now has a real composition, delete the template rather than "
+                    "leaving a skeleton that will quietly override it.")
+            missing_keys = sorted({"based_on", "remove_components", "element_swaps",
+                                   "assert_elements_for", "note"} - set(template))
+            if missing_keys:
+                raise ParameterError(
+                    f"export.unknown_chemistry_template[{chemistry!r}] is missing "
+                    f"{missing_keys}.")
+        if ex.write_unknown_chemistries:
+            untemplated = sorted(set(sc.chemistries_without_composition)
+                                 - set(ex.unknown_chemistry_template))
+            if untemplated:
+                raise ParameterError(
+                    f"{untemplated} have no composition and no "
+                    "export.unknown_chemistry_template entry, so no file could be "
+                    "written for them at all -- add a template or set "
+                    "export.write_unknown_chemistries = False.")
         if ex.export_format not in ("csv", "xlsx"):
             raise ParameterError(
                 f"export.export_format must be 'csv' or 'xlsx': {ex.export_format!r}")

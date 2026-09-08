@@ -35,9 +35,18 @@ about 5% lower and would understate every mass by that much.
 batteryCellSeparator have no element rows in the workbook -- about 8% of pack
 mass. Both levels are written so the gap is visible rather than inferred.
 
-⚠️ SODIUM-ION AND SOLID-STATE ARE NOT WRITTEN. They have no composition in the
-workbook and are not variants of anything that does. The run reports them as
-missing instead of substituting a lookalike.
+⚠️ SODIUM-ION AND SOLID-STATE ARE WRITTEN, AND MARKED. They have no composition
+in the workbook, so their files carry the expected ROW SKELETON with every mass
+left EMPTY and `composition_status = "unknown"`. Nothing is substituted from a
+lookalike chemistry. A file of blanks is harder to overlook downstream than a
+missing file, and the stock-and-flow model can carry the chemistry through and
+see the gap arrive rather than silently dropping that share of the fleet.
+
+The skeleton itself is a structural assumption, set in
+`export.unknown_chemistry_template`, and it is the only thing asserted about
+those two: sodium swaps aluminium for copper on the anode current collector;
+bipolar solid-state has no separator, no liquid electrolyte and no per-cell
+terminals, and an anode of lithium or sodium metal rather than graphite.
 """
 
 from __future__ import annotations
@@ -128,7 +137,59 @@ def build_rows(model: CompositionModel, params, capacities: pd.DataFrame,
     if export.include_uncertainty:
         keep += [c for c in rows.columns if c.startswith("mass_p") or c == "mass_mean"]
     rows["chemistry"] = chemistry
+    rows["composition_status"] = "from_workbook"
+    rows["note"] = ""
+    keep = keep + ["composition_status", "note"]
     return rows[["chemistry"] + [c for c in keep if c in rows.columns]]
+
+
+def build_unknown_rows(model: CompositionModel, params, capacities: pd.DataFrame,
+                       chemistry: str) -> pd.DataFrame:
+    """
+    The row skeleton for a chemistry with no composition: right shape, no numbers.
+
+    Every mass column is left empty on purpose. The point is that a downstream
+    reader gets a row it cannot mistake for data and cannot silently skip --
+    not that it gets a plausible-looking guess.
+    """
+    template = params.export.unknown_chemistry_template[chemistry]
+    base = template["based_on"]
+    removed = set(template["remove_components"])
+    swaps = dict(template["element_swaps"])
+
+    rows = build_rows(model, params, capacities, base)
+    rows = rows[~rows.component.isin(removed)].copy()
+
+    for component, mapping in swaps.items():
+        # Scoped to one component. A blanket swap would recolour every copper in
+        # the pack, cables included, when only the anode collector changes.
+        target = rows.component == component
+        rows.loc[target, "element"] = rows.loc[target, "element"].replace(mapping)
+
+    # Borrowing a component list is not the same as knowing what the cathode is
+    # made of. Outside the components the template is willing to claim, the
+    # element is written 'unknown' rather than left showing the base
+    # chemistry's -- a row reading 'Fe' for a sodium cathode would be a claim
+    # nobody made, empty mass or not.
+    asserted = set(template["assert_elements_for"])
+    unclaimed = rows.element.notna() & ~rows.component.isin(asserted)
+    rows.loc[unclaimed, "element"] = "unknown"
+
+    # A swap can collapse two element rows into one (LFP's Al and Cu terminals
+    # both become Al). With no masses to add up, the duplicate is just noise.
+    rows = rows.drop_duplicates(
+        subset=["segment", "year", "level", "component", "element"]).copy()
+
+    rows["chemistry"] = chemistry
+    rows["layer1"] = chemistry
+    rows["composition_status"] = "unknown"
+    rows["note"] = template["note"]
+
+    # Wipe every number. Capacity and structure survive; nothing quantitative does.
+    for column in [c for c in rows.columns
+                   if c.startswith("mass_") or c == "kg_per_kwh"]:
+        rows[column] = pd.NA
+    return rows
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -160,19 +221,27 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     chemistries = sorted(set(model._series.keys.chemistry) - {params.scope.pack_level_key})
-    missing = [c for c in params.scenarios.chemistries_without_composition]
+    missing = list(params.scenarios.chemistries_without_composition)
 
     print(f"Export years: {params.export_years()}")
     print(f"Segments    : {sorted(capacities.segment.unique())}")
     print(f"Capacity    : fitted to {LAST_OBSERVED_YEAR}, then "
           f"'{export.capacity_projection}', capped at {export.max_projected_capacity_kwh:g} kWh")
     print(f"Chemistries : {len(chemistries)} with composition -- {chemistries}")
-    print(f"NOT written : {missing} -- no composition in the workbook, and not a "
-          "variant of one that has it.")
+    if export.write_unknown_chemistries:
+        print(f"              {len(missing)} marked unknown -- {missing}: row skeleton "
+              "only, every mass left empty.")
+    else:
+        print(f"NOT written : {missing} (export.write_unknown_chemistries is off).")
 
     written = []
-    for chemistry in chemistries:
-        rows = build_rows(model, params, capacities, chemistry)
+    to_write = [(c, False) for c in chemistries]
+    if export.write_unknown_chemistries:
+        to_write += [(c, True) for c in missing]
+
+    for chemistry, unknown in to_write:
+        rows = (build_unknown_rows(model, params, capacities, chemistry) if unknown
+                else build_rows(model, params, capacities, chemistry))
         name = f"composition_{chemistry}.{export.export_format}"
         path = params.composition_output_path(PROJECT_ROOT, name)
         if export.export_format == "csv":
@@ -180,7 +249,8 @@ def main(argv: list[str] | None = None) -> int:
         else:
             rows.to_excel(path, index=False, sheet_name="composition")
         written.append((path, len(rows)))
-        print(f"  {path.name:<44} {len(rows):>7,} rows")
+        flag = "  << UNKNOWN, masses empty" if unknown else ""
+        print(f"  {path.name:<44} {len(rows):>7,} rows{flag}")
 
     index = capacities.pivot_table(index="segment", columns="year",
                                    values="capacity_kwh_nominal")

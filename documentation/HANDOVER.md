@@ -371,8 +371,29 @@ flattening in most segments since 2023 and continuing a decade of growth for
 another forty-four years would put C-segment cars well over 100 kWh with nothing
 supporting it. `trend` is there to bound the other side.
 
-**⚠️ Sodium-ion and solid-state are not written**, and the run says so rather
-than substituting a lookalike.
+**Sodium-ion and solid-state ARE written, and marked.** Nine files, not seven.
+Their rows carry the expected skeleton with **every mass column empty** and
+`composition_status = "unknown"`; nothing is substituted from a lookalike. A file
+of blanks is harder to overlook downstream than a missing file, and the
+stock-and-flow model can carry the chemistry through and see the gap arrive
+rather than silently dropping that share of the fleet.
+
+The skeleton is a structural assumption and the only thing asserted about them
+(`export.unknown_chemistry_template`):
+
+- **Na_ion** — LFP's component list; **Al replaces Cu on `currentCollectorAnode`
+  only**. That swap is ~0.4 kg Cu/kWh, 55–59% of the pack's copper, and it is
+  the main reason to model sodium at all. The pack **cables stay copper** — the
+  swap is scoped to the collector, not applied to every copper in the pack.
+- **solid_state** — NMC high-Ni's list minus `batteryCellSeparator`,
+  `batteryCellElectrolyte` and `batteryPackCellTerminals` (bipolar stacking
+  needs no per-cell terminals). Collector elements left unknown: a Li-metal
+  anode normally keeps its copper substrate, a Na one would not, and that is open.
+
+Outside the components each template explicitly claims (`assert_elements_for`),
+the element is written **`unknown`** rather than the base chemistry's. Borrowing
+a component list is not knowing what the cathode is made of, and a row reading
+`Fe` for a sodium cathode would be a claim nobody made — empty mass or not.
 
 ## 6. Open questions, and who they are for
 
