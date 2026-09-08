@@ -382,7 +382,48 @@ forward unchanged; `trend` continues the gradient. **Every row carries
 most segments since 2023, and continuing a decade of growth for another 44 years
 would put C-segment cars well over 100 kWh with nothing supporting it.
 
-### 6.3 ⚠️ Sodium-ion and solid-state have no composition
+### 6.3 Range saturation: where a solid-state pack's capacity comes from
+
+Once energy density stops binding, a battery is no longer as big as you can
+afford to carry. There is no point carrying range nobody drives, so the pack is
+sized for a **range target** and every further gain in density shows up as
+**less mass**. `technology.range_saturation_km` is the input; the mass saving is
+what falls out.
+
+**⚠️ A 1000–1500 km range and a one-third material saving are not both
+achievable — the arithmetic decides between them.** Using this project's own
+numbers: today's real range is 220–667 km by segment (median ~490) at 118–215
+Wh/kg pack, and real consumption is 132 Wh/km in A rising to 194 in JF. At
+**500 Wh/kg pack**:
+
+| range target | resulting pack mass |
+|---|---|
+| **1000 km** | 0.61–1.07× today, mean ~0.75 — about a **quarter** off |
+| **1500 km** | 0.97–1.61× today — **heavier than today** |
+| *mass at 2/3 of today* | *implies 620–1030 km, mean ~850 km* |
+
+A third off the material corresponds to roughly **850 km**, not to 1000–1500.
+Chasing 1500 km spends the entire density gain and more: ~490 → 1500 km is a
+factor 3 in capacity, while 200 → 500 Wh/kg is a factor 2.5 in density.
+
+Segment A actually gets *heavier* (1.07×): a small car with a 1000 km pack is a
+bigger battery than it has ever carried.
+
+**⚠️ And 500 Wh/kg must be a PACK figure for this to hold.** Solid-state is
+usually quoted at cell level. At 500 Wh/kg cell with a bipolar pack packing at
+~0.8, the pack is 400 Wh/kg — and a 1000 km car is then **0.81–1.34× today's
+mass**, barely a saving at all.
+
+The consumption figures are **mild-weather** medians of models introduced from
+2022. The cold-weather column is about 35% higher, so a car built for 1000 km in
+January is a third bigger again.
+
+Under the default — 1000 km at 500 Wh/kg pack — solid-state packs run 132 kWh in
+A to 194 kWh in JF, at 264 to 388 kg. Those rows carry `pack_mass_kg_implied`:
+**a whole-pack figure, not a composition.** No component's mass is stated,
+because none is known.
+
+### 6.4 ⚠️ Sodium-ion and solid-state have no composition
 
 They are written anyway — with the expected row skeleton, **every mass column
 empty**, and `composition_status = "unknown"`. A missing file is easy to overlook
@@ -424,6 +465,8 @@ empty mass or not.
 | Models, not registrations | all vehicle-table results | §4.2 |
 | Returning mix assumes constant sales volume | all outflow results | §5.1 |
 | Cross-component error correlation not modelled | pack-level band too tight | §3.3 |
+| Range saturation gives ~25% material saving at 1000 km, not 33% | the difference between a 1000 km and an 850 km target | §6.3 |
+| 500 Wh/kg at cell rather than pack level would nearly erase the saving | 0.81–1.34× today instead of 0.61–1.07× | §6.3 |
 
 None of these is hidden in the code. Each is printed at runtime, marked in a
 column, or stated on the figure that depends on it.
@@ -434,6 +477,10 @@ column, or stated on the figure that depends on it.
 
 1. **The aluminium-to-plastics ratio for the cell casing.** One parameter edit
    fills it into every file.
+1. **Is the 500 Wh/kg solid-state figure cell or pack?** It decides whether the
+   material saving is a quarter or nothing (§6.3).
+1. **What range target?** 1000 km gives ~25% off the material; a third off needs
+   ~850 km; 1500 km makes packs heavier than today.
 2. **Compositions for sodium-ion and bipolar solid-state** — including which
    components cease to exist, not just new numbers.
 3. **Does pack mass really keep rising linearly above 100 kWh?** The straight line

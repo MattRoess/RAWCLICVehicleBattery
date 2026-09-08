@@ -187,6 +187,64 @@ def apply_material_overrides(rows: pd.DataFrame, params) -> pd.DataFrame:
     return pd.concat([keep, pd.DataFrame(expanded)], ignore_index=True) if expanded else keep
 
 
+def segment_consumption(params, ev: EVDetails) -> pd.Series:
+    """Real-world Wh/km per segment: the parameter if set, else the file."""
+    tech = params.technology
+    if tech.segment_consumption_wh_per_km:
+        return pd.Series(tech.segment_consumption_wh_per_km, dtype=float)
+
+    raw = pd.read_csv(params.ev_details_path(PROJECT_ROOT), low_memory=False)
+    column = "real-consumption_combined_mild_weather"   # values look like '157 Wh/km'
+    if column not in raw.columns:
+        raise EVDetailsError(
+            f"{column!r} is not in EV_details.csv, so a range target cannot be turned "
+            "into a capacity. Set technology.segment_consumption_wh_per_km instead.")
+    consumption = raw[["car_id", column]].copy()
+    consumption["wh_per_km"] = consumption[column].map(
+        lambda value: float(pd.Series([value]).str.extract(r"([\d.]+)")[0].iloc[0])
+        if pd.notna(value) else float("nan"))
+    merged = ev.models.merge(consumption[["car_id", "wh_per_km"]], on="car_id", how="left")
+    recent = merged[merged.first_year >= tech.consumption_from_year]
+    return recent.groupby("segment")["wh_per_km"].median().dropna()
+
+
+def range_saturated_capacities(params, ev: EVDetails, capacities: pd.DataFrame,
+                               chemistry: str) -> pd.DataFrame:
+    """
+    Capacity set by a range target rather than by the segment's history.
+
+    Once energy density stops binding there is no reason to carry range nobody
+    drives, so the pack is sized for `technology.range_saturation_km` and the
+    remaining density gain shows up as less mass. The capacity is the input; the
+    mass saving is what falls out of it.
+    """
+    tech = params.technology
+    consumption = segment_consumption(params, ev)
+    density = tech.chemistry_pack_wh_per_kg[chemistry]
+
+    out = capacities.copy()
+    wh_per_km = out.segment.map(consumption)
+    unknown = sorted(out.loc[wh_per_km.isna(), "segment"].unique())
+    if unknown:
+        print(f"[export] no consumption figure for {unknown} -- those segments keep "
+              "their historical capacity.")
+    saturated = wh_per_km * tech.range_saturation_km / 1000.0
+    wanted = saturated.fillna(out.capacity_kwh_nominal).round(2)
+    ceiling = params.export.max_projected_capacity_kwh
+    clipped = sorted(out.loc[wanted > ceiling, "segment"].unique())
+    if clipped:
+        print(f"[export] {chemistry}: the {tech.range_saturation_km:g} km target needs "
+              f"more than export.max_projected_capacity_kwh ({ceiling:g} kWh) in "
+              f"{clipped} -- capped, so the range target is NOT met there and the mass "
+              "saving shown is larger than the assumption really gives.")
+    out["capacity_kwh_nominal"] = wanted.clip(
+        params.interpolation.min_capacity_kwh, ceiling)
+    out["capacity_is_projected"] = True
+    out["pack_mass_kg_implied"] = (out.capacity_kwh_nominal * 1000.0 / density).round(1)
+    out["wh_per_km"] = wh_per_km
+    return out
+
+
 def build_unknown_rows(model: CompositionModel, params, capacities: pd.DataFrame,
                        chemistry: str) -> pd.DataFrame:
     """
@@ -198,6 +256,8 @@ def build_unknown_rows(model: CompositionModel, params, capacities: pd.DataFrame
     """
     template = params.export.unknown_chemistry_template[chemistry]
     base = template["based_on"]
+    implied = capacities.set_index(["segment", "year"])["pack_mass_kg_implied"] \
+        if "pack_mass_kg_implied" in capacities.columns else None
     removed = set(template["remove_components"])
     swaps = dict(template["element_swaps"])
 
@@ -233,6 +293,18 @@ def build_unknown_rows(model: CompositionModel, params, capacities: pd.DataFrame
     for column in [c for c in rows.columns
                    if c.startswith("mass_") or c == "kg_per_kwh"]:
         rows[column] = pd.NA
+
+    if implied is not None:
+        # The WHOLE PACK's mass follows from the assumed energy density and the
+        # capacity, so it can be stated even though no component's mass can. It
+        # is the same for every row of a segment-year and is not a composition.
+        rows["pack_mass_kg_implied"] = pd.MultiIndex.from_frame(
+            rows[["segment", "year"]]).map(implied)
+        density = params.technology.chemistry_pack_wh_per_kg[chemistry]
+        rows["note"] = rows["note"] + (
+            f"; pack mass implied by {density:g} Wh/kg at a "
+            f"{params.technology.range_saturation_km:g} km range target — a whole-pack "
+            "figure, not a composition")
     return rows
 
 
@@ -283,9 +355,34 @@ def main(argv: list[str] | None = None) -> int:
     if export.write_unknown_chemistries:
         to_write += [(c, True) for c in missing]
 
+    reference_mass = None
     for chemistry, unknown in to_write:
-        rows = (build_unknown_rows(model, params, capacities, chemistry) if unknown
-                else build_rows(model, params, capacities, chemistry))
+        chemistry_capacities = capacities
+        if unknown and params.technology.apply_range_saturation \
+                and chemistry in params.technology.chemistry_pack_wh_per_kg:
+            chemistry_capacities = range_saturated_capacities(params, ev, capacities,
+                                                              chemistry)
+            if reference_mass is None:
+                reference = params.technology.reference_chemistry
+                reference_mass = {
+                    entry.segment: model.weights_at(entry.capacity_kwh_nominal,
+                                                    chemistry=reference)["mass_kg"].sum()
+                    for entry in capacities[capacities.year == capacities.year.max()]
+                    .itertuples()}
+            latest = chemistry_capacities[
+                chemistry_capacities.year == chemistry_capacities.year.max()]
+            print(f"\n  {chemistry}: capacity set by a "
+                  f"{params.technology.range_saturation_km:g} km range target at "
+                  f"{params.technology.chemistry_pack_wh_per_kg[chemistry]:g} Wh/kg pack")
+            for entry in latest.itertuples():
+                today = reference_mass.get(entry.segment)
+                ratio = f"{entry.pack_mass_kg_implied / today:.2f}x" if today else "n/a"
+                print(f"      {entry.segment:<3} {entry.wh_per_km:5.0f} Wh/km -> "
+                      f"{entry.capacity_kwh_nominal:6.1f} kWh, "
+                      f"{entry.pack_mass_kg_implied:6.1f} kg  ({ratio} today's "
+                      f"{today:.0f} kg)" if today else "")
+        rows = (build_unknown_rows(model, params, chemistry_capacities, chemistry) if unknown
+                else build_rows(model, params, chemistry_capacities, chemistry))
         name = f"composition_{chemistry}.{export.export_format}"
         path = params.composition_output_path(PROJECT_ROOT, name)
         if export.export_format == "csv":

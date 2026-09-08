@@ -762,11 +762,15 @@ class ExportParams:
     # SAFE TO CHANGE: yes -- 'trend' is there to bound the other side.
     capacity_projection: str = "hold"
 
-    # Cap on the projected capacity, kWh, whatever the projection says. A trend
-    # continued to 2070 has to stop somewhere, and an unbounded one silently
-    # leaves the range the composition model will answer for.
-    # SAFE TO CHANGE: yes.
-    max_projected_capacity_kwh: float = 150.0
+    # Cap on the projected capacity, kWh, whatever the projection or a range
+    # target says. A trend continued to 2070 has to stop somewhere, and an
+    # unbounded one silently leaves the range the composition model will answer
+    # for. Raised from 150 to 200 because a 1000 km range target needs 159 kWh
+    # in F and 194 in JF, and a cap of 150 was quietly clipping seven of the
+    # eleven segments -- which made the mass saving look bigger than the
+    # assumption actually gives. Any clipping is now reported.
+    # SAFE TO CHANGE: yes, but keep it at or below interpolation.max_capacity_kwh.
+    max_projected_capacity_kwh: float = 200.0
 
     # Levels written. Each becomes its own set of rows, tagged in a 'level'
     # column, so one file answers at whichever detail the caller needs.
@@ -883,6 +887,80 @@ class ExportParams:
     })
 
 
+@dataclass
+class TechnologyParams:
+    """
+    Where a future chemistry's CAPACITY comes from, once energy density stops
+    being the binding constraint.
+
+    THE ARGUMENT. Today a battery is as big as the pack you can afford to carry.
+    If solid-state reaches 500 Wh/kg, that stops being true: there is no point
+    carrying range nobody drives, so capacity saturates at whatever gives a
+    sensible range and every further gain in density is taken as LESS MASS.
+    Material per car then falls.
+
+    ⚠️ THE ARITHMETIC DOES NOT SUPPORT BOTH HALVES OF THAT AT ONCE, and the
+    numbers are the workbook's and the vehicle table's, not a guess. Today's
+    real range is 220-667 km by segment (median ~490) at 118-215 Wh/kg pack. At
+    500 Wh/kg PACK:
+
+        range target 1000 km  ->  pack mass 0.65-1.07x today (mean ~0.79)
+        range target 1500 km  ->  pack mass 0.97-1.61x today -- HEAVIER
+        pack mass 2/3 of today -> range 620-1030 km (mean ~850)
+
+    So a third off the material corresponds to about 850 km, not to 1000-1500.
+    Chasing 1500 km spends the whole density gain and then some: going from
+    ~490 km to 1500 km is a factor 3 in capacity, while 200 -> 500 Wh/kg is a
+    factor 2.5 in density.
+
+    The saturation range is therefore the input here and the mass reduction is
+    an OUTPUT. Setting both would be over-determined, and the one that has a
+    physical argument behind it -- nobody drives 1500 km without stopping -- is
+    the range.
+    """
+
+    # Whether a chemistry's capacity is set by a range target rather than by
+    # continuing its segment's historical capacity.
+    # SAFE TO CHANGE: yes. Off means every chemistry keeps the segment capacity
+    # from 03, which is the conservative assumption.
+    apply_range_saturation: bool = True
+
+    # The range a car is built for once density stops binding, in km, on the
+    # real-world consumption in EV_details.csv. 1000 km is the lower end of the
+    # "no point going further" argument; 850 km is what a one-third material
+    # saving actually corresponds to.
+    # SAFE TO CHANGE: yes -- this is THE lever, and the mass saving follows it.
+    range_saturation_km: float = 1000.0
+
+    # ⚠️ PACK level, not cell. Solid-state is usually quoted at cell level, and
+    # the difference decides the answer: 500 Wh/kg cell with a bipolar pack at
+    # ~0.8 packing is 400 Wh/kg pack, at which a 1000 km car is 0.81-1.34x
+    # today's mass -- barely a saving at all. Today's packs here are 118-215
+    # Wh/kg, so 500 is a 2.3-4.2x improvement.
+    # SAFE TO CHANGE: yes, and check which level you mean before you do.
+    chemistry_pack_wh_per_kg: dict[str, float] = field(default_factory=lambda: {
+        "solid_state": 500.0,
+    })
+
+    # Real-world consumption per segment, Wh/km, used to turn a range target
+    # into a capacity. Left empty, it is taken from EV_details.csv -- the median
+    # of models introduced from 2022 on, which is 132 Wh/km for A rising to 194
+    # for JF. Fill it to override.
+    # SAFE TO CHANGE: yes. Note these are MILD-weather figures; the cold-weather
+    # column is about 35% higher, and a car built for 1000 km in January is a
+    # third bigger again.
+    segment_consumption_wh_per_km: dict[str, float] = field(default_factory=dict)
+
+    # Models introduced from this year on are used for the consumption median.
+    # SAFE TO CHANGE: yes.
+    consumption_from_year: int = 2022
+
+    # The chemistry whose pack mass today is the comparison for "material
+    # reduced by a third".
+    # SAFE TO CHANGE: yes.
+    reference_chemistry: str = "battLiNMC_highNi"
+
+
 # ======================================================================
 #  END OF SETTINGS.  Below here is plumbing.
 # ======================================================================
@@ -893,7 +971,7 @@ class Params:
 
     SECTIONS = ("paths", "scope", "drawing", "interpolation", "monte_carlo", "capacity_figure",
                 "ev_details", "scenarios",
-                "second_life", "export")
+                "second_life", "technology", "export")
 
     paths: PathParams = field(default_factory=PathParams)
     scope: ScopeParams = field(default_factory=ScopeParams)
@@ -904,6 +982,7 @@ class Params:
     ev_details: EVDetailsParams = field(default_factory=EVDetailsParams)
     scenarios: ScenarioParams = field(default_factory=ScenarioParams)
     second_life: SecondLifeParams = field(default_factory=SecondLifeParams)
+    technology: TechnologyParams = field(default_factory=TechnologyParams)
     export: ExportParams = field(default_factory=ExportParams)
 
     def sheet_names(self) -> list[str]:
@@ -1234,6 +1313,31 @@ class Params:
             raise ParameterError(
                 "second_life.returning_mix_file_name must end in '.png': "
                 f"{sl.returning_mix_file_name!r}")
+
+        tech = self.technology
+        if tech.range_saturation_km <= 0:
+            raise ParameterError(
+                f"technology.range_saturation_km must be positive: "
+                f"{tech.range_saturation_km}")
+        bad_density = {name: value for name, value in tech.chemistry_pack_wh_per_kg.items()
+                       if value <= 0}
+        if bad_density:
+            raise ParameterError(
+                f"technology.chemistry_pack_wh_per_kg values must be positive: "
+                f"{bad_density}")
+        unknown_density = sorted(set(tech.chemistry_pack_wh_per_kg)
+                                 - set(sc.scenario_colours))
+        if unknown_density:
+            raise ParameterError(
+                f"technology.chemistry_pack_wh_per_kg names chemistries that appear "
+                f"in no scenario: {unknown_density}")
+        bad_consumption = {name: value
+                           for name, value in tech.segment_consumption_wh_per_km.items()
+                           if value <= 0}
+        if bad_consumption:
+            raise ParameterError(
+                f"technology.segment_consumption_wh_per_km values must be positive "
+                f"Wh/km: {bad_consumption}")
 
         ex = self.export
         if ex.export_year_step < 1:
