@@ -413,12 +413,42 @@ have plateaued at 400–600 km rather than climbing: **it is cheaper to charge
 faster than to carry more.** Fast charging substitutes for capacity, and that
 substitution is what makes the material saving real.
 
-Pack mass relative to today, fleet mean over the twelve segments:
+**⚠️ Energy density is a trajectory, and its basis is CELL.** Two things were
+conflated in an earlier version of this document and both mattered:
+
+- **Cell or pack.** Solid-state figures in the press are cell figures. Today's
+  packing ratio in this workbook is 0.59 (NMC high-Ni) to 0.69 (LFP) — a 356
+  Wh/kg cell gives a 211 Wh/kg pack. Bipolar stacking should do better, having no
+  per-cell terminals and less module hardware, so **0.80** is assumed.
+- **It is not one number.** The first solid-state cells are around 400 Wh/kg and
+  500–600 follows. A chemistry entering in 2040 and still being built in 2070 does
+  not have one density for thirty years.
+
+The assumed trajectory, and what it does to a JC pack (94 kWh at a 600 km target,
+against today's 399 kg):
+
+| year | cell Wh/kg | pack Wh/kg | pack mass | vs today |
+|---|---|---|---|---|
+| 2040 | 400 | 320 | 294 kg | 0.74× |
+| 2050 | 500 | 400 | 236 kg | 0.59× |
+| 2060 | 600 | 480 | 196 kg | 0.49× |
+| 2070 | 600 | 480 | 196 kg | 0.49× |
+
+So the saving **arrives gradually**: about a quarter off when solid-state enters,
+reaching a half only once cells reach 600 Wh/kg. An earlier version of this
+document assumed a flat 500 Wh/kg *pack* — equivalent to a 625 Wh/kg cell from
+day one — and overstated the early saving by a third.
+
+Pack mass relative to today at a 600 km target, fleet mean over the twelve
+segments, by **pack** Wh/kg:
 
 | pack Wh/kg | **600 km** | 800 km | 1000 km | 1200 km | 1500 km |
 |---|---|---|---|---|---|
 | 400 | 0.60 | 0.80 | 1.00 | 1.19 | 1.49 |
-| **500** *(default)* | **0.48** | 0.64 | 0.80 | 0.96 | 1.19 |
+| 480 *(2060+, from a 600 Wh/kg cell)* | **0.50** | 0.67 | 0.83 | 1.00 | 1.24 |
+| 400 *(2050, from a 500 Wh/kg cell)* | 0.60 | 0.80 | 1.00 | 1.19 | 1.49 |
+| 320 *(2040, from a 400 Wh/kg cell)* | 0.75 | 1.00 | 1.25 | 1.49 | 1.86 |
+| 500 | 0.48 | 0.64 | 0.80 | 0.96 | 1.19 |
 | 600 | 0.40 | 0.53 | 0.66 | 0.80 | 1.00 |
 | 700 | 0.34 | 0.46 | 0.57 | 0.68 | 0.85 |
 | 800 | 0.30 | 0.40 | 0.50 | 0.60 | 0.75 |
@@ -426,8 +456,9 @@ Pack mass relative to today, fleet mean over the twelve segments:
 **Rule of thumb: mass vs today ≈ 0.40 × (range km ÷ pack Wh/kg).** It reproduces
 every cell above, and lets any other pair be checked without rerunning anything.
 
-Under the default, solid-state packs run **79 kWh in A to 116 kWh in JF, at 158
-to 233 kg — 0.39× to 0.64× today's mass, mean ~0.48.** Those capacities sit
+Under the default, solid-state packs run **79 kWh in A to 116 kWh in JF**. At
+first-generation density (2040, 400 Wh/kg cell) that is 165–243 kg, **0.40× to
+0.67× today's mass**; by 2060 at 600 Wh/kg cell it is a third lower again. Those capacities sit
 inside the range of packs already on sale, which a 1200 km target did not.
 
 Three things this exposes, all of which survived the change of target:
@@ -436,9 +467,9 @@ Three things this exposes, all of which survived the change of target:
   material and a 1000–1500 km range are mutually exclusive: at 1200 km, 500 Wh/kg
   gives 0.96× — no saving — and a third off would need ~717 Wh/kg pack. At
   1500 km it would need ~900 Wh/kg, beyond any lithium chemistry.
-- **⚠️ 500 Wh/kg must be a PACK figure.** Solid-state is usually quoted at cell
-  level. At 500 cell with a bipolar pack packing at ~0.8 the pack is 400 Wh/kg,
-  and the saving at 600 km falls from 0.48× to 0.60×.
+- **⚠️ The cell-to-pack ratio is not a detail.** At 0.70 rather than 0.85, a
+  600 Wh/kg cell gives 420 rather than 510 Wh/kg pack — 0.57× against 0.47× of
+  today's mass. The 0.80 assumed here is itself a guess about bipolar packaging.
 - **Segment A saves least, always** — 0.64× here, and it is the only segment that
   ever goes *above* 1.0 at longer targets. A small car carrying a long-range pack
   is always a battery out of proportion to itself.
@@ -508,8 +539,8 @@ column, or stated on the figure that depends on it.
    fills it into every file.
 1. **Is the 500 Wh/kg solid-state figure cell or pack?** It decides whether the
    material saving is a quarter or nothing (§6.3).
-1. **Is 500 Wh/kg cell or pack?** Pack is assumed. At cell level the saving at
-   600 km falls from 0.48× to 0.60×.
+1. **The cell-to-pack ratio for a bipolar solid-state pack.** 0.80 is assumed
+   against today's 0.59–0.69; the plausible range moves the answer by ~20%.
 2. **Compositions for sodium-ion and bipolar solid-state** — including which
    components cease to exist, not just new numbers.
 3. **Does pack mass really keep rising linearly above 100 kWh?** The straight line

@@ -969,14 +969,46 @@ class TechnologyParams:
     # SAFE TO CHANGE: yes -- this is THE lever, and the mass saving follows it.
     range_saturation_km: float = 600.0
 
-    # ⚠️ PACK level, not cell. Solid-state is usually quoted at cell level, and
-    # the difference decides the answer: 500 Wh/kg cell with a bipolar pack at
-    # ~0.8 packing is 400 Wh/kg pack, at which a 1000 km car is 0.81-1.34x
-    # today's mass -- barely a saving at all. Today's packs here are 118-215
-    # Wh/kg, so 500 is a 2.3-4.2x improvement.
-    # SAFE TO CHANGE: yes, and check which level you mean before you do.
-    chemistry_pack_wh_per_kg: dict[str, float] = field(default_factory=lambda: {
-        "solid_state": 500.0,
+    # ⚠️ ENERGY DENSITY, AS A TRAJECTORY AND WITH ITS BASIS STATED.
+    #
+    # Two things were being conflated before and both mattered.
+    #
+    # FIRST, CELL OR PACK. Solid-state figures in the press are CELL figures.
+    # Today's packing ratio in this workbook is 0.59 (NMC high-Ni) to 0.69 (LFP)
+    # -- a 356 Wh/kg cell gives a 211 Wh/kg pack. Bipolar stacking should do
+    # better, having no per-cell terminals and less module hardware, so 0.80 is
+    # assumed below. At that ratio a 400 Wh/kg CELL is a 320 Wh/kg pack, and the
+    # difference decides the answer: at a 600 km target, 320 pack is 0.75x
+    # today's mass while 500 pack is 0.48x.
+    #
+    # SECOND, IT IS NOT ONE NUMBER. The first solid-state cells are around
+    # 400 Wh/kg and 500-600 follows; a chemistry entering in 2040 and still
+    # being built in 2070 does not have one density for thirty years. Values are
+    # given at anchor years and interpolated, held flat outside them.
+    #
+    #     cell Wh/kg   ->  pack at 0.80  ->  mass vs today at 600 km
+    #        400              320              0.75x
+    #        500              400              0.60x
+    #        600              480              0.50x
+    #
+    # SAFE TO CHANGE: yes. Say which basis you are using -- it is the single
+    # easiest thing to get wrong here.
+    chemistry_energy_density: dict[str, dict] = field(default_factory=lambda: {
+        "solid_state": {
+            "basis": "cell",
+            "years": (2040, 2050, 2060, 2070),
+            "wh_per_kg": (400.0, 500.0, 600.0, 600.0),
+        },
+    })
+
+    # Cell-to-pack packing ratio, used only when 'basis' above is 'cell'.
+    # Today's workbook chemistries sit at 0.59-0.69. Bipolar solid-state should
+    # beat that: it needs no per-cell terminals and less module hardware.
+    # SAFE TO CHANGE: yes. 0.85 is optimistic, 0.70 conservative -- and the
+    # spread between them is 0.63x to 0.75x of today's mass at 600 km, so this
+    # is not a detail.
+    cell_to_pack_ratio: dict[str, float] = field(default_factory=lambda: {
+        "solid_state": 0.80,
     })
 
     # Real-world consumption per segment, Wh/km, used to turn a range target
@@ -1360,18 +1392,44 @@ class Params:
             raise ParameterError(
                 f"technology.range_saturation_km must be positive: "
                 f"{tech.range_saturation_km}")
-        bad_density = {name: value for name, value in tech.chemistry_pack_wh_per_kg.items()
-                       if value <= 0}
-        if bad_density:
+        for chemistry, entry in tech.chemistry_energy_density.items():
+            if chemistry not in sc.scenario_colours:
+                raise ParameterError(
+                    f"technology.chemistry_energy_density names {chemistry!r}, which "
+                    "appears in no scenario.")
+            missing = sorted({"basis", "years", "wh_per_kg"} - set(entry))
+            if missing:
+                raise ParameterError(
+                    f"technology.chemistry_energy_density[{chemistry!r}] is missing "
+                    f"{missing}.")
+            if entry["basis"] not in ("cell", "pack"):
+                raise ParameterError(
+                    f"technology.chemistry_energy_density[{chemistry!r}]['basis'] must "
+                    f"be 'cell' or 'pack': {entry['basis']!r}. Getting this wrong is "
+                    "worth about 25% of the pack mass.")
+            if len(entry["years"]) != len(entry["wh_per_kg"]):
+                raise ParameterError(
+                    f"technology.chemistry_energy_density[{chemistry!r}] has "
+                    f"{len(entry['years'])} years and {len(entry['wh_per_kg'])} "
+                    "densities.")
+            if list(entry["years"]) != sorted(entry["years"]):
+                raise ParameterError(
+                    f"technology.chemistry_energy_density[{chemistry!r}]['years'] must "
+                    f"ascend: {entry['years']}")
+            if any(value <= 0 for value in entry["wh_per_kg"]):
+                raise ParameterError(
+                    f"technology.chemistry_energy_density[{chemistry!r}] densities must "
+                    f"be positive: {entry['wh_per_kg']}")
+            if entry["basis"] == "cell" and chemistry not in tech.cell_to_pack_ratio:
+                raise ParameterError(
+                    f"technology.chemistry_energy_density[{chemistry!r}] is on the CELL "
+                    "basis but has no technology.cell_to_pack_ratio entry, so it cannot "
+                    "be turned into a pack figure.")
+        bad_ratio = {name: value for name, value in tech.cell_to_pack_ratio.items()
+                     if not 0 < value <= 1}
+        if bad_ratio:
             raise ParameterError(
-                f"technology.chemistry_pack_wh_per_kg values must be positive: "
-                f"{bad_density}")
-        unknown_density = sorted(set(tech.chemistry_pack_wh_per_kg)
-                                 - set(sc.scenario_colours))
-        if unknown_density:
-            raise ParameterError(
-                f"technology.chemistry_pack_wh_per_kg names chemistries that appear "
-                f"in no scenario: {unknown_density}")
+                f"technology.cell_to_pack_ratio values must be in (0, 1]: {bad_ratio}")
         bad_consumption = {name: value
                            for name, value in tech.segment_consumption_wh_per_km.items()
                            if value <= 0}

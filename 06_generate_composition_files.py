@@ -242,9 +242,10 @@ def range_saturated_capacities(params, ev: EVDetails, capacities: pd.DataFrame,
     """
     tech = params.technology
     consumption = segment_consumption(params, ev)
-    density = tech.chemistry_pack_wh_per_kg[chemistry]
 
     out = capacities.copy()
+    out["pack_wh_per_kg"] = out.year.map(
+        lambda year: pack_density(params, chemistry, year))
     wh_per_km = out.segment.map(consumption)
     unknown = sorted(out.loc[wh_per_km.isna(), "segment"].unique())
     if unknown:
@@ -258,9 +259,29 @@ def range_saturated_capacities(params, ev: EVDetails, capacities: pd.DataFrame,
     # the assumption gives.
     out["capacity_kwh_nominal"] = saturated.fillna(out.capacity_kwh_nominal).round(2)
     out["capacity_is_projected"] = True
-    out["pack_mass_kg_implied"] = (out.capacity_kwh_nominal * 1000.0 / density).round(1)
+    out["pack_mass_kg_implied"] = (out.capacity_kwh_nominal * 1000.0
+                                   / out.pack_wh_per_kg).round(1)
     out["wh_per_km"] = wh_per_km
     return out
+
+
+def pack_density(params, chemistry: str, year: float) -> float:
+    """
+    Pack Wh/kg for a chemistry in a given year, from its density trajectory.
+
+    Two conversions in one place, because both were being got wrong. The
+    trajectory may be quoted at CELL level -- which is how solid-state figures
+    are usually published -- in which case it is multiplied by the packing
+    ratio; and it is a trajectory rather than a constant, because a chemistry
+    entering in 2040 and still being built in 2070 does not have one density for
+    thirty years.
+    """
+    entry = params.technology.chemistry_energy_density[chemistry]
+    value = float(np.interp(float(year), np.asarray(entry["years"], dtype=float),
+                            np.asarray(entry["wh_per_kg"], dtype=float)))
+    if entry["basis"] == "cell":
+        value *= params.technology.cell_to_pack_ratio[chemistry]
+    return value
 
 
 def build_unknown_rows(model: CompositionModel, params, capacities: pd.DataFrame,
@@ -331,9 +352,8 @@ def build_unknown_rows(model: CompositionModel, params, capacities: pd.DataFrame
         # is the same for every row of a segment-year and is not a composition.
         rows["pack_mass_kg_implied"] = pd.MultiIndex.from_frame(
             rows[["segment", "year"]]).map(implied)
-        density = params.technology.chemistry_pack_wh_per_kg[chemistry]
         rows["note"] = rows["note"] + (
-            f"; pack mass implied by {density:g} Wh/kg at a "
+            f"; pack mass implied by the {chemistry} density trajectory at a "
             f"{params.technology.range_saturation_km:g} km range target — a whole-pack "
             "figure, not a composition")
     return rows
@@ -390,7 +410,7 @@ def main(argv: list[str] | None = None) -> int:
     for chemistry, unknown in to_write:
         chemistry_capacities = capacities
         if unknown and params.technology.apply_range_saturation \
-                and chemistry in params.technology.chemistry_pack_wh_per_kg:
+                and chemistry in params.technology.chemistry_energy_density:
             chemistry_capacities = range_saturated_capacities(params, ev, capacities,
                                                               chemistry)
             if reference_mass is None:
@@ -402,9 +422,16 @@ def main(argv: list[str] | None = None) -> int:
                     .itertuples()}
             latest = chemistry_capacities[
                 chemistry_capacities.year == chemistry_capacities.year.max()]
-            print(f"\n  {chemistry}: capacity set by a "
-                  f"{params.technology.range_saturation_km:g} km range target at "
-                  f"{params.technology.chemistry_pack_wh_per_kg[chemistry]:g} Wh/kg pack")
+            entry = params.technology.chemistry_energy_density[chemistry]
+            trajectory = ", ".join(
+                f"{year}: {pack_density(params, chemistry, year):.0f}"
+                for year in entry["years"])
+            print(f"\n  {chemistry}: capacity from a "
+                  f"{params.technology.range_saturation_km:g} km range target; "
+                  f"density {entry['basis']} basis"
+                  + (f" x {params.technology.cell_to_pack_ratio[chemistry]:.2f} packing"
+                     if entry["basis"] == "cell" else "")
+                  + f" -> pack Wh/kg by year [{trajectory}]")
             for entry in latest.itertuples():
                 today = reference_mass.get(entry.segment)
                 ratio = f"{entry.pack_mass_kg_implied / today:.2f}x" if today else "n/a"
