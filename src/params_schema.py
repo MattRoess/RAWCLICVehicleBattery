@@ -987,10 +987,10 @@ class TechnologyParams:
     # being built in 2070 does not have one density for thirty years. Values are
     # given at anchor years and interpolated, held flat outside them.
     #
-    #     cell Wh/kg   ->  pack at 0.80  ->  mass vs today at 600 km
-    #        400              320              0.75x
-    #        500              400              0.60x
-    #        600              480              0.50x
+    #     cell Wh/kg   ->  pack at 0.85  ->  mass vs today at 600 km
+    #        400              340              0.71x
+    #        500              425              0.56x
+    #        600              510              0.47x
     #
     # SAFE TO CHANGE: yes. Say which basis you are using -- it is the single
     # easiest thing to get wrong here.
@@ -1003,13 +1003,15 @@ class TechnologyParams:
     })
 
     # Cell-to-pack packing ratio, used only when 'basis' above is 'cell'.
-    # Today's workbook chemistries sit at 0.59-0.69. Bipolar solid-state should
-    # beat that: it needs no per-cell terminals and less module hardware.
-    # SAFE TO CHANGE: yes. 0.85 is optimistic, 0.70 conservative -- and the
-    # spread between them is 0.63x to 0.75x of today's mass at 600 km, so this
-    # is not a detail.
+    # Today's workbook chemistries sit at 0.59-0.69; bipolar solid-state beats
+    # that, needing no per-cell terminals and less module hardware. 0.85 was
+    # supplied 2026-09-08 and is no longer a guess -- it is the highest of the
+    # plausible range, so it is the optimistic end of this assumption.
+    # SAFE TO CHANGE: yes, and it is not a detail: 0.70 instead of 0.85 moves a
+    # 600 Wh/kg cell from a 510 to a 420 Wh/kg pack, and the mass at 600 km from
+    # 0.47x to 0.57x of today.
     cell_to_pack_ratio: dict[str, float] = field(default_factory=lambda: {
-        "solid_state": 0.80,
+        "solid_state": 0.85,
     })
 
     # Real-world consumption per segment, Wh/km, used to turn a range target
