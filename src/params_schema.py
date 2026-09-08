@@ -423,12 +423,65 @@ class EVDetailsParams:
         "JA": 25.0, "JB": 45.0, "JC": 60.0, "JD": 80.0, "JE": 80.0, "JF": 100.0,
     })
 
+    # A model with an open window ("Since March 2021") is treated as on sale
+    # through this year. It is the file's own horizon, not a forecast.
+    # SAFE TO CHANGE: yes, but past last_year it has no visible effect.
+    open_window_end_year: int = 2026
+
+    # HOW THE CURVE IS SMOOTHED. Not a straight line: capacity per segment rises
+    # and then flattens, and a line through that either understates the recent
+    # years or overstates the early ones. This is a local linear regression with
+    # Gaussian weights -- LOESS in all but name -- fitted to the individual
+    # models rather than to yearly averages, so a year with forty variants
+    # counts for more than one with four.
+    #
+    # The bandwidth is the Gaussian's sigma IN YEARS. It sets how much of the
+    # neighbouring years each point of the curve can see: small follows the data
+    # closely and wanders, large is smooth and flattens real turns.
+    # SAFE TO CHANGE: yes. Below ~1.5 the curve starts chasing single models;
+    # above ~4 it will smooth away the flattening after 2023.
+    smoothing_bandwidth_years: float = 2.0
+
+    # The curve is only drawn where enough models sit within one bandwidth of
+    # that year. Without this the fit runs on into years held up by two cars.
+    # SAFE TO CHANGE: yes.
+    min_effective_models: float = 4.0
+
+    # TWO DIFFERENT UNCERTAINTIES, drawn as two different bands.
+    #
+    # (1) THE MARKET SPREAD: how far apart the models on sale actually are in a
+    # given year -- the same car type sold with several pack sizes. This is real
+    # dispersion, not error, and it does not shrink with more data.
+    # SAFE TO CHANGE: yes.
+    spread_lower_percentile: float = 10.0
+    spread_upper_percentile: float = 90.0
+
+    # (2) UNCERTAINTY OF THE CURVE ITSELF: how much the fitted line would move
+    # if the market had happened to contain a different sample of models.
+    # Bootstrapped by resampling MODELS -- never model-years, which would treat
+    # one long-lived car as several independent observations and make the band
+    # far too narrow.
+    # SAFE TO CHANGE: yes. 400 draws is enough for a band; 2,000 for a figure
+    # that is going somewhere.
+    bootstrap_draws: int = 400
+    curve_band_lower_percentile: float = 2.5
+    curve_band_upper_percentile: float = 97.5
+
+    # Fixed seed so the bootstrap band is reproducible. None for a fresh sample.
+    # SAFE TO CHANGE: yes.
+    bootstrap_seed: int | None = 20260908
+
+    # Draw the individual models behind the bands, so the reader can see how
+    # many there are and how scattered.
+    # SAFE TO CHANGE: yes -- presentation only.
+    show_model_scatter: bool = True
+
     # The figure, in paths.output_dir.
     # SAFE TO CHANGE: yes. Keep the .png suffix.
     capacity_over_time_file_name: str = "bev_capacity_by_segment_over_time.png"
 
     # SAFE TO CHANGE: yes.
-    capacity_over_time_figure_size_in: tuple[float, float] = (16.0, 6.5)
+    capacity_over_time_figure_size_in: tuple[float, float] = (17.0, 8.5)
 
 
 # ======================================================================
@@ -634,6 +687,25 @@ class Params:
             raise ParameterError(
                 f"ev_details.min_models_per_year must be at least 1: "
                 f"{ev.min_models_per_year}")
+        if ev.smoothing_bandwidth_years <= 0:
+            raise ParameterError(
+                f"ev_details.smoothing_bandwidth_years must be positive: "
+                f"{ev.smoothing_bandwidth_years}")
+        if ev.bootstrap_draws < 1:
+            raise ParameterError(
+                f"ev_details.bootstrap_draws must be at least 1: {ev.bootstrap_draws}")
+        for low, high, label in (
+            (ev.spread_lower_percentile, ev.spread_upper_percentile, "spread"),
+            (ev.curve_band_lower_percentile, ev.curve_band_upper_percentile, "curve_band"),
+        ):
+            if not 0 <= low < high <= 100:
+                raise ParameterError(
+                    f"ev_details.{label} percentiles must satisfy 0 <= lower < upper "
+                    f"<= 100: {low}, {high}")
+        if ev.min_effective_models <= 0:
+            raise ParameterError(
+                f"ev_details.min_effective_models must be positive: "
+                f"{ev.min_effective_models}")
         if not ev.capacity_over_time_file_name.endswith(".png"):
             raise ParameterError(
                 "ev_details.capacity_over_time_file_name must end in '.png': "

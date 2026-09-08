@@ -18,10 +18,9 @@ Repository: <https://github.com/MattRoess/RAWCLICVehicleBattery>, public, branch
 | `27a2e59` | The product-structure drawing | yes |
 | `c513524` | Project set up for Positron | yes |
 
-**One uncommitted change is in the working tree**: `src/params_schema.py` has a
-new `ev_details` section (13 parameters) whose code has NOT been written yet.
-See §5 — this is the one loose end, and it is loose on purpose rather than by
-accident.
+*Updated 2026-09-08:* the `ev_details` loose end recorded here is **closed** —
+`src/ev_details.py` and `03_capacity_by_segment_over_time.py` now exist and run.
+See §5.
 
 Nothing under `data/` is tracked, and nothing ever should be. `git ls-files`
 returns code and config only.
@@ -128,24 +127,62 @@ this one wrong; split on `Layer 1` instead.
 
 ---
 
-## 5. The loose end: `ev_details`
+## 5. `ev_details` — capacity by segment over time
 
-`src/params_schema.py` has an uncommitted `ev_details` section — 13 parameters
-covering the CSV's file name, which capacity basis to use, which country's
-availability dates, the year range, the segments, and a copy of the
-stock-and-flow `battery_size_map` to compare against. It validates and
-`00_parameters.py` regenerates cleanly with it.
+**Closed 2026-09-08.** `src/ev_details.py` parses the CSV and fits the curves;
+`03_capacity_by_segment_over_time.py` draws them and prints the table. Only
+segment and capacity over time is implemented — the other ~140 columns of the
+CSV are untouched and for later.
 
-**The code those parameters configure does not exist.** There is no
-`src/ev_details.py` and no `03_…` script. The request being worked when the
-session ended was: *segment and battery capacity over time*, and only that —
-the rest of the CSV is for later.
+```bash
+./.venv/bin/python 03_capacity_by_segment_over_time.py
+```
 
-So the next person either writes that code, or reverts the section. It is not a
-half-broken state — nothing imports it — but it is a promise the repository does
-not yet keep.
+How it works, and the choices inside it:
 
-### What the profiling already established
+- A variant counts in **every year its availability window covers**, so the
+  series is "what was on sale", not "what launched".
+- The curve is a **local linear regression with Gaussian weights** (LOESS in all
+  but name), 2-year bandwidth, fitted to individual variants rather than yearly
+  averages — capacity climbs and then flattens, and a straight line through that
+  gets both ends wrong. Local *linear*, not a local mean, because a mean
+  flattens the trend exactly at the ends of the range where the recent years are.
+- **Two different bands, and they are not the same quantity.** The wide one is
+  the market spread (p10–p90 of models actually on sale) — real dispersion, the
+  same car sold with several pack sizes, and it does not shrink with more data.
+  The narrow one is bootstrap uncertainty of the fitted curve, resampled over
+  **models, never model-years**: a car on sale eight years is one observation of
+  the market, not eight, and resampling years would collapse the band to nothing.
+- A segment-year with fewer than `min_effective_models` nearby is left blank
+  rather than drawn. That is why **JA is empty** — 2 models.
+- `_parse_window` knows the six availability patterns that occur and **raises on
+  a seventh** rather than guessing.
+
+### Fitted capacity in 2026 against `battery_size_map`
+
+| segment | fitted | map | gap | models |
+|---|---|---|---|---|
+| A | 28.1 | 25 | +12% | 31 |
+| B | 43.0 | 45 | −4% | 68 |
+| C | 62.7 | 60 | +4% | 101 |
+| D | 77.6 | 80 | −3% | 100 |
+| E | 85.8 | 80 | +7% | 81 |
+| F | 100.3 | 100 | +0% | 134 |
+| JB | 55.3 | 45 | **+23%** | 97 |
+| JC | 72.5 | 60 | **+21%** | 266 |
+| JD | 83.4 | 80 | +4% | 140 |
+| JE | 99.2 | 80 | **+24%** | 61 |
+| JF | 101.4 | 100 | +1% | 56 |
+
+The plain A–F segments are close. The jellybean segments are not: JB, JC and JE
+are 21–24% low, and JC is the most populous segment in the file at 266 models.
+
+**⚠️ These are models, not registrations.** A segment with many variants is not
+a segment with many cars on the road. Before `battery_size_map` is changed on
+this evidence, the models need weighting by sales — which the stock-and-flow
+model already holds, via the EEA data.
+
+### What the profiling established
 
 Run, verified, not yet in any script:
 
