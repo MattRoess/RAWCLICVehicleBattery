@@ -8,8 +8,13 @@ EV-database table.
     ./.venv/bin/python 00_parameters.py                       # first, always
     ./.venv/bin/python 03_capacity_by_segment_over_time.py
 
-Writes `bev_capacity_by_segment_over_time.png` to paths.output_dir and prints
-the fitted capacity per segment per year.
+Writes one figure per capacity basis to paths.output_dir -- nominal and useable
+are drawn separately, never on one pair of axes -- and prints the fitted
+capacity per segment per year for each.
+
+⚠️ NOMINAL IS THE ONE THE REST OF THIS PROJECT USES. The composition workbook's
+kg/kWh is per nominal kWh, so nominal is what feeds `CompositionModel`. Useable
+is what the car actually delivers; it is worth seeing, and it is about 6% lower.
 
 The parsing, the smoothing and the bootstrap live in `src/ev_details.py`; every
 setting lives in `src/params_schema.py`. This file asks and draws.
@@ -29,6 +34,7 @@ WHAT THE THREE LAYERS IN EACH PANEL ARE
 
 from __future__ import annotations
 
+import copy
 import sys
 from pathlib import Path
 
@@ -127,14 +133,20 @@ def draw(ev: EVDetails, segments: list[str]):
 
     fig.suptitle(
         f"BEV battery capacity by segment, {settings.first_year}–{settings.last_year}"
-        f"  ·  {settings.capacity_basis} capacity  ·  availability: {settings.availability_country}\n"
+        f"  ·  {settings.capacity_basis.upper()} capacity  ·  availability: {settings.availability_country}\n"
         f"curve = local linear regression, Gaussian bandwidth {settings.smoothing_bandwidth_years:g} years, "
         f"fitted to individual model variants  ·  bootstrap {settings.bootstrap_draws:,} draws over models",
         fontsize=11.5, ha="left", x=0.006, y=0.995)
+    basis_note = ("nominal — the stated pack size, and the basis the composition "
+                  "workbook's kg/kWh is per"
+                  if settings.capacity_basis == "nominal"
+                  else "useable — what the car delivers, about 6% below nominal; NOT the "
+                       "basis to multiply kg/kWh by")
     fig.text(0.006, 0.005,
-             "A model counts in every year its availability window covers, so this is what was ON SALE, "
-             "not what launched. These are MODELS, not registrations — a segment with many variants is not "
-             "the same as a segment with many cars on the road.",
+             f"Capacity basis: {basis_note}.\n"
+             "A model counts in every year its availability window covers, so this is what was ON SALE, not "
+             "what launched. These are models rather than registrations — the trade-off for having a series "
+             "that runs back to 2015 at all.",
              fontsize=7.5, color="#8a3b3b")
     fig.tight_layout(rect=[0, 0.075, 1, 0.93])
     return fig, curves
@@ -147,35 +159,55 @@ def main(argv: list[str] | None = None) -> int:
         print(f"src/params_schema.py is NOT valid:\n  {error}", file=sys.stderr)
         return 1
 
-    settings = params.ev_details
-    segments = list(settings.car_segments) + list(settings.jellybean_segments)
+    segments = (list(params.ev_details.car_segments)
+                + list(params.ev_details.jellybean_segments))
+    fitted_by_basis: dict[str, pd.DataFrame] = {}
 
-    try:
-        ev = EVDetails(params, project_root=PROJECT_ROOT)
-        figure, curves = draw(ev, segments)
-    except EVDetailsError as error:
-        print(f"{error}", file=sys.stderr)
-        return 1
+    for basis in params.ev_details.capacity_bases_to_plot:
+        # One figure per basis, from a copy of the settings with only the basis
+        # changed -- nominal and useable are different quantities and putting
+        # them on shared axes would invite reading them as one series.
+        basis_params = copy.deepcopy(params)
+        basis_params.ev_details.capacity_basis = basis
+        settings = basis_params.ev_details
 
-    table = pd.DataFrame({segment: pd.Series(curve.central, index=curve.years.astype(int))
-                          for segment, curve in curves.items()})
-    print(f"\nSmoothed {settings.capacity_basis} capacity [kWh] by segment and year")
-    print(table.round(1).to_string())
+        try:
+            ev = EVDetails(basis_params, project_root=PROJECT_ROOT)
+            figure, curves = draw(ev, segments)
+        except EVDetailsError as error:
+            print(f"{error}", file=sys.stderr)
+            return 1
 
-    print("\nLatest year against the stock-and-flow battery_size_map:")
-    latest = settings.last_year
-    for segment, curve in curves.items():
-        fitted = table.loc[latest, segment]
-        reference = settings.reference_battery_size_map.get(segment)
-        if reference is None or np.isnan(fitted):
-            continue
-        gap = (fitted - reference) / reference
-        print(f"  {segment:<3} fitted {fitted:6.1f}   map {reference:6.1f}   "
-              f"{gap:+6.0%}   ({curve.n_models} models)")
+        table = pd.DataFrame({segment: pd.Series(curve.central, index=curve.years.astype(int))
+                              for segment, curve in curves.items()})
+        fitted_by_basis[basis] = table
+        print(f"\nSmoothed {basis.upper()} capacity [kWh] by segment and year")
+        print(table.round(1).to_string())
 
-    path = params.output_path(PROJECT_ROOT, settings.capacity_over_time_file_name)
-    figure.savefig(path, dpi=params.drawing.output_dpi, bbox_inches="tight", facecolor="white")
-    print(f"\nSaved {path}")
+        print(f"\n{basis.upper()}: {settings.last_year} against the stock-and-flow "
+              "battery_size_map")
+        for segment, curve in curves.items():
+            fitted = table.loc[settings.last_year, segment]
+            reference = settings.reference_battery_size_map.get(segment)
+            if reference is None or np.isnan(fitted):
+                continue
+            gap = (fitted - reference) / reference
+            print(f"  {segment:<3} fitted {fitted:6.1f}   map {reference:6.1f}   "
+                  f"{gap:+6.0%}   ({curve.n_models} models)")
+
+        path = params.output_path(
+            PROJECT_ROOT, settings.capacity_over_time_file_name.format(basis=basis))
+        figure.savefig(path, dpi=params.drawing.output_dpi, bbox_inches="tight",
+                       facecolor="white")
+        print(f"Saved {path}")
+
+    if {"nominal", "useable"} <= set(fitted_by_basis):
+        ratio = (fitted_by_basis["useable"] / fitted_by_basis["nominal"]).iloc[-1]
+        print("\nUseable as a fraction of nominal in "
+              f"{params.ev_details.last_year}, per segment:")
+        print("  " + "  ".join(f"{seg} {value:.3f}" for seg, value in ratio.dropna().items()))
+        print("  The composition workbook is per NOMINAL kWh -- feeding it a useable "
+              "figure would understate every mass by roughly this much.")
     return 0
 
 

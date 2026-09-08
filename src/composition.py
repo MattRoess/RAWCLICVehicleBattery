@@ -13,6 +13,14 @@ cell chemistry, with a Monte Carlo band around it.
     model = CompositionModel(params)
     model.weights_at(150.0, chemistry="battLiNMC_midNi", level="component")
 
+⚠️ WHICH kWh THIS MODEL EXPECTS
+--------------------------------
+NOMINAL capacity -- the pack's gross, stated figure. The composition workbook's
+kg/kWh is per nominal kWh (confirmed 2026-09-08), so a useable figure passed in
+here silently returns about 6% too little of everything (median useable/nominal
+is 0.944). If a capacity comes from EV_details.csv, it must be
+`battery_nominal_capacity`, which is what `ev_details.capacity_basis` defaults to.
+
 WHAT IS INTERPOLATED, AND WHY IT IS MASS
 -----------------------------------------
 The workbook is in kg/kWh, but kg/kWh is the wrong thing to interpolate. A part
@@ -302,8 +310,10 @@ class CompositionModel:
 
         Parameters
         ----------
-        capacity_kwh : any capacity inside interpolation.min/max_capacity_kwh.
-            Above the largest anchor the answer is extrapolated, and the
+        capacity_kwh : NOMINAL capacity in kWh -- the workbook's kg/kWh is per
+            nominal kWh, so a useable figure returns ~6% too little of
+            everything. Must be inside interpolation.min/max_capacity_kwh;
+            above the largest anchor the answer is extrapolated, and the
             `extrapolated` column says so.
         chemistry : a Layer 1 cell chemistry, e.g. 'battLiNMC_midNi'. The
             pack-level components (Layer 1 = battPackXEV) are always included --

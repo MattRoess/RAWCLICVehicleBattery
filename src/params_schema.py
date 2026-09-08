@@ -366,13 +366,24 @@ class EVDetailsParams:
     # SAFE TO CHANGE: yes, when a newer scrape arrives.
     ev_details_file_name: str = "EV_details.csv"
 
-    # WHICH CAPACITY. 'useable' is what the car will actually deliver;
-    # 'nominal' is the pack's gross figure. They differ by about 6% (median
-    # useable/nominal = 0.944), so the choice moves every mass derived from it.
-    # The composition workbook is in kg per kWh without saying WHICH kWh, which
-    # is a question worth settling before these two are joined up.
-    # SAFE TO CHANGE: yes.
-    capacity_basis: str = "useable"
+    # WHICH CAPACITY the curves are fitted to. 'nominal' is the pack's gross,
+    # stated figure; 'useable' is what the car will actually deliver. They
+    # differ by about 6% (median useable/nominal = 0.944).
+    #
+    # ⚠️ THE DEFAULT IS 'nominal' BECAUSE THE COMPOSITION WORKBOOK IS PER
+    # NOMINAL kWh (confirmed 2026-09-08). Anything joining EV_details.csv to
+    # BATT_consolidated_composition.xlsx -- which is every mass this project
+    # computes -- has to be on the nominal basis, or every result is ~6% light.
+    # 'useable' is still worth plotting, as what the driver gets, but it is not
+    # the number to multiply kg/kWh by.
+    # SAFE TO CHANGE: yes for a figure; NOT for anything feeding the composition.
+    capacity_basis: str = "nominal"
+
+    # Both bases are drawn, as separate figures: 'nominal' is the one the
+    # composition arithmetic uses, 'useable' is what the car delivers. Keeping
+    # them apart stops the two being read as one series.
+    # SAFE TO CHANGE: yes -- any subset of ('nominal', 'useable').
+    capacity_bases_to_plot: tuple[str, ...] = ("nominal", "useable")
 
     # WHICH COUNTRY'S AVAILABILITY DATES. The file carries United Kingdom, The
     # Netherlands and Germany for every model. 'Germany' is the default as the
@@ -476,9 +487,11 @@ class EVDetailsParams:
     # SAFE TO CHANGE: yes -- presentation only.
     show_model_scatter: bool = True
 
-    # The figure, in paths.output_dir.
-    # SAFE TO CHANGE: yes. Keep the .png suffix.
-    capacity_over_time_file_name: str = "bev_capacity_by_segment_over_time.png"
+    # The figures, in paths.output_dir. '{basis}' is filled with 'nominal' or
+    # 'useable', so the two cannot overwrite each other or be mistaken for one
+    # another later.
+    # SAFE TO CHANGE: yes. Keep '{basis}' and the .png suffix.
+    capacity_over_time_file_name: str = "bev_capacity_by_segment_over_time_{basis}.png"
 
     # SAFE TO CHANGE: yes.
     capacity_over_time_figure_size_in: tuple[float, float] = (17.0, 8.5)
@@ -710,6 +723,18 @@ class Params:
             raise ParameterError(
                 "ev_details.capacity_over_time_file_name must end in '.png': "
                 f"{ev.capacity_over_time_file_name!r}")
+        if "{basis}" not in ev.capacity_over_time_file_name:
+            raise ParameterError(
+                "ev_details.capacity_over_time_file_name must contain '{basis}', "
+                "or the nominal and useable figures overwrite each other: "
+                f"{ev.capacity_over_time_file_name!r}")
+        if not ev.capacity_bases_to_plot:
+            raise ParameterError("ev_details.capacity_bases_to_plot is empty.")
+        unknown_bases = sorted(set(ev.capacity_bases_to_plot) - {"nominal", "useable"})
+        if unknown_bases:
+            raise ParameterError(
+                f"ev_details.capacity_bases_to_plot may only contain 'nominal' and "
+                f"'useable': {unknown_bases}")
         overlapping = set(ev.car_segments) & set(ev.jellybean_segments)
         if overlapping:
             raise ParameterError(

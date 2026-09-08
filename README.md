@@ -24,6 +24,7 @@ It is the battery counterpart to `RAWCLICVehicleComposition` (whole car) and
 | `99_check_environment.py` | Checks the interpreter, the pinned packages and the workbook, and prints the workbook's real structure. Writes nothing. |
 | `01_draw_battery_structure.py` | Draws every component of the BEV battery, labelled with the workbook's own `Layer 2` codes. |
 | `02_composition_by_capacity.py` | The composition at **any** capacity, with a Monte Carlo band. Prints a table and writes two figures. |
+| `03_capacity_by_segment_over_time.py` | Battery capacity by segment and year from `EV_details.csv`, smoothed, with the market spread and a bootstrap band. One figure per capacity basis. |
 
 `02` takes arguments:
 
@@ -59,7 +60,12 @@ model = CompositionModel(current())
 model.weights_at(150.0, chemistry="battLiNMC_midNi", level="component")
 ```
 
-Three things about it are worth knowing before the numbers are used.
+**⚠️ Feed it NOMINAL capacity.** The workbook's kg/kWh is per nominal kWh, not
+useable. Useable runs about 5% lower, so a useable figure returns about 5% too
+little of everything. `ev_details.capacity_basis` defaults to `nominal` for the
+same reason.
+
+Three more things are worth knowing before the numbers are used.
 
 **It interpolates mass, not kg/kWh.** A part whose mass does not change with
 capacity — `currentCollectorAnode` on high-Ni is 21.4 kg at 25 kWh and 21.8 kg at

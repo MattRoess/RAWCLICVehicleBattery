@@ -177,10 +177,16 @@ How it works, and the choices inside it:
 The plain A–F segments are close. The jellybean segments are not: JB, JC and JE
 are 21–24% low, and JC is the most populous segment in the file at 266 models.
 
-**⚠️ These are models, not registrations.** A segment with many variants is not
-a segment with many cars on the road. Before `battery_size_map` is changed on
-this evidence, the models need weighting by sales — which the stock-and-flow
-model already holds, via the EEA data.
+On the **nominal** basis — the one that matters for the composition — every
+segment sits above the map, and the gaps widen: A +16%, B +2%, C +10%, D +2%,
+E +14%, F +6%, JB +30%, JC +27%, JD +10%, JE +31%, JF +6%.
+
+**These are models, not registrations**, and that is a known and accepted
+trade-off rather than an oversight: detailed registration data exists only per
+year, so this is the only source that runs back to 2015 at all. A segment with
+many variants is still not a segment with many cars on the road, so a
+sales-weighted version — using the EEA data the stock-and-flow model already
+holds — would be the way to turn this into a `battery_size_map` revision.
 
 ### What the profiling established
 
@@ -219,17 +225,20 @@ Run, verified, not yet in any script:
 - **Capacity range**: median 75 kWh useable, 95th percentile 106.5, maximum 141.
   98 models above 100 kWh, only 5 above 120. So extrapolating to 150 kWh covers
   the real fleet rather than inventing a hypothetical one.
-- **⚠️ Useable vs nominal capacity differ by ~6%** (median ratio 0.944). The
-  composition workbook is in kg per kWh *without stating which kWh*. That
-  question should be settled before the two files are joined, because it moves
-  every derived mass by 6%.
+- **Useable vs nominal capacity differ by ~6%** (median ratio 0.944). Settled:
+  the composition workbook is per **nominal**. Both bases are plotted, as
+  separate figures, because they are different quantities — but only nominal
+  may be multiplied by kg/kWh.
 
 ---
 
 ## 6. Open questions, and who they are for
 
-1. **Which kWh does the workbook mean** — useable or nominal? Nobody here can
-   answer it from the file. It is a 6% error in every mass if guessed wrong.
+1. ~~Which kWh does the workbook mean?~~ **ANSWERED 2026-09-08: nominal.** The
+   composition workbook's kg/kWh is per nominal capacity, so `weights_at()` must
+   be fed nominal, and `ev_details.capacity_basis` defaults to `nominal` for
+   that reason. Useable runs about 5% below nominal (0.937–0.969 by segment);
+   feeding a useable figure in understates every mass by that much.
 2. **Does mass really keep rising linearly above 100 kWh?** The straight line
    implies specific energy climbing to 219 Wh/kg at 150 kWh and 232 at 200. That
    is the weakest part of the extrapolation. A view on how pack mass actually
