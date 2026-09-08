@@ -54,8 +54,12 @@ class PathParams:
     # Where the figures are written, relative to the project root. Everything
     # here is regenerable by re-running the scripts, and untracked for that
     # reason as much as for the no-data-in-git rule.
+    #
+    # This is the ONLY place figures are written. It was data/processed until
+    # figures were also being copied to figures/ by hand, which meant two homes
+    # and one of them going stale the moment a script ran.
     # SAFE TO CHANGE: yes.
-    output_dir: str = "data/processed"
+    output_dir: str = "figures"
 
 
 @dataclass

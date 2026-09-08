@@ -20,9 +20,11 @@ Thumbs.db
 # A fresh clone gets the CODE ONLY and cannot run until data/raw/ is supplied
 # separately (iCloud, shared drive, however it is distributed).
 #
-# The whole tree, inputs and generated figures alike -- said once here so a new
-# output cannot slip through by having an extension nobody thought to list.
+# The whole tree, inputs and generated figures alike -- said once at the folder
+# so a new output cannot slip through by having an extension nobody thought to
+# list. paths.output_dir writes into figures/; data/ holds the inputs.
 /data/
+/figures/
 
 # The extensions too, wherever they land outside data/.
 *.xlsx

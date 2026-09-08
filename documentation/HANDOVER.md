@@ -47,7 +47,7 @@ selected (`.vscode/settings.json`).
 | `src/params_io.py` | writes `params.xlsx` (a report — nothing reads it) |
 | `src/composition.py` | the model: composition at any capacity, with uncertainty |
 | `data/raw/` | `BATT_consolidated_composition.xlsx`, `EV_details.csv` — supplied separately, never in git |
-| `data/processed/` | the three figures, all regenerable |
+| `figures/` | every figure, all regenerable — `paths.output_dir` writes here, and only here |
 
 ### The public function
 

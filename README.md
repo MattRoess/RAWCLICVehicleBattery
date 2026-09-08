@@ -39,12 +39,13 @@ table alone.
 
 | folder | holds |
 |---|---|
-| `data/raw/` | `BATT_consolidated_composition.xlsx` — the input, supplied separately |
-| `data/processed/` | the figures, all regenerable |
+| `data/raw/` | `BATT_consolidated_composition.xlsx` and `EV_details.csv` — the inputs, supplied separately |
+| `figures/` | every figure, all regenerable — `paths.output_dir` |
 | `src/` | `params_schema.py`, `params_io.py`, `composition.py` |
 
-The whole `data/` tree is untracked. A fresh clone gets the code only and needs
-`data/raw/` supplied from iCloud.
+`data/` and `figures/` are both untracked. A fresh clone gets the code only and
+needs `data/raw/` supplied from iCloud; the figures come back by re-running the
+scripts.
 
 ## Composition at any capacity
 
