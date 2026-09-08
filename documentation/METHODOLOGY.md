@@ -396,18 +396,38 @@ numbers: today's real range is 220–667 km by segment (median ~490) at 118–21
 Wh/kg pack, and real consumption is 132 Wh/km in A rising to 194 in JF. At
 **500 Wh/kg pack**:
 
-| range target | resulting pack mass |
-|---|---|
-| **1000 km** | 0.61–1.07× today, mean ~0.75 — about a **quarter** off |
-| **1500 km** | 0.97–1.61× today — **heavier than today** |
-| *mass at 2/3 of today* | *implies 620–1030 km, mean ~850 km* |
+Mass relative to today, fleet mean across the eleven segments:
 
-A third off the material corresponds to roughly **850 km**, not to 1000–1500.
-Chasing 1500 km spends the entire density gain and more: ~490 → 1500 km is a
-factor 3 in capacity, while 200 → 500 Wh/kg is a factor 2.5 in density.
+| pack Wh/kg | 600 km | 1000 km | **1200 km** | 1500 km |
+|---|---|---|---|---|
+| 400 | 0.60 | 1.00 | 1.19 | 1.49 |
+| **500** *(default)* | 0.48 | 0.80 | **0.96** | 1.19 |
+| 600 | 0.40 | 0.66 | 0.80 | 1.00 |
+| 700 | 0.34 | 0.57 | 0.68 | 0.85 |
+| 800 | 0.30 | 0.50 | 0.60 | 0.75 |
 
-Segment A actually gets *heavier* (1.07×): a small car with a 1000 km pack is a
-bigger battery than it has ever carried.
+**Rule of thumb: mass vs today ≈ 0.40 × (range km ÷ pack Wh/kg).** It reproduces
+every cell above.
+
+**The settled assumption is 1200 km at 500 Wh/kg pack, and it is very nearly no
+material saving at all — 0.96× today's mass.** The longer range spends almost the
+whole density gain. Per segment it runs 0.78× (F) to 1.29× (A). What each outcome
+needs, fleet mean:
+
+| | 1000 km | 1200 km | 1500 km |
+|---|---|---|---|
+| same mass as today | 398 Wh/kg | 478 | 597 |
+| **one third off** | 597 | **717** | 896 |
+| half off | 796 | 956 | 1194 |
+
+So the one-third saving first proposed needs about **717 Wh/kg at pack level** at
+this range. A third off at 1500 km would need ~900 Wh/kg pack, which is beyond
+any lithium chemistry.
+
+Segment A gets *heavier* under every combination that keeps a long range: 1.29× at
+1200 km, and still 0.80× at 1000 Wh/kg and 1500 km — the worst in the fleet. A
+small car with a long-range pack is always carrying a battery out of proportion
+to itself.
 
 **⚠️ And 500 Wh/kg must be a PACK figure for this to hold.** Solid-state is
 usually quoted at cell level. At 500 Wh/kg cell with a bipolar pack packing at
@@ -418,8 +438,8 @@ The consumption figures are **mild-weather** medians of models introduced from
 2022. The cold-weather column is about 35% higher, so a car built for 1000 km in
 January is a third bigger again.
 
-Under the default — 1000 km at 500 Wh/kg pack — solid-state packs run 132 kWh in
-A to 194 kWh in JF, at 264 to 388 kg. Those rows carry `pack_mass_kg_implied`:
+Under the default — 1200 km at 500 Wh/kg pack — solid-state packs run 158 kWh in
+A to 233 kWh in JF, at 317 to 466 kg. Those rows carry `pack_mass_kg_implied`:
 **a whole-pack figure, not a composition.** No component's mass is stated,
 because none is known.
 
@@ -465,7 +485,7 @@ empty mass or not.
 | Models, not registrations | all vehicle-table results | §4.2 |
 | Returning mix assumes constant sales volume | all outflow results | §5.1 |
 | Cross-component error correlation not modelled | pack-level band too tight | §3.3 |
-| Range saturation gives ~25% material saving at 1000 km, not 33% | the difference between a 1000 km and an 850 km target | §6.3 |
+| At the settled 1200 km and 500 Wh/kg, there is essentially **no** material saving (0.96×) | a third off would need ~717 Wh/kg pack | §6.3 |
 | 500 Wh/kg at cell rather than pack level would nearly erase the saving | 0.81–1.34× today instead of 0.61–1.07× | §6.3 |
 
 None of these is hidden in the code. Each is printed at runtime, marked in a
@@ -479,8 +499,8 @@ column, or stated on the figure that depends on it.
    fills it into every file.
 1. **Is the 500 Wh/kg solid-state figure cell or pack?** It decides whether the
    material saving is a quarter or nothing (§6.3).
-1. **What range target?** 1000 km gives ~25% off the material; a third off needs
-   ~850 km; 1500 km makes packs heavier than today.
+1. **Is 500 Wh/kg the right density?** At the settled 1200 km it yields no
+   saving; 717 Wh/kg pack would be needed for the one-third reduction.
 2. **Compositions for sodium-ion and bipolar solid-state** — including which
    components cease to exist, not just new numbers.
 3. **Does pack mass really keep rising linearly above 100 kWh?** The straight line

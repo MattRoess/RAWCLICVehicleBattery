@@ -229,16 +229,12 @@ def range_saturated_capacities(params, ev: EVDetails, capacities: pd.DataFrame,
         print(f"[export] no consumption figure for {unknown} -- those segments keep "
               "their historical capacity.")
     saturated = wh_per_km * tech.range_saturation_km / 1000.0
-    wanted = saturated.fillna(out.capacity_kwh_nominal).round(2)
-    ceiling = params.export.max_projected_capacity_kwh
-    clipped = sorted(out.loc[wanted > ceiling, "segment"].unique())
-    if clipped:
-        print(f"[export] {chemistry}: the {tech.range_saturation_km:g} km target needs "
-              f"more than export.max_projected_capacity_kwh ({ceiling:g} kWh) in "
-              f"{clipped} -- capped, so the range target is NOT met there and the mass "
-              "saving shown is larger than the assumption really gives.")
-    out["capacity_kwh_nominal"] = wanted.clip(
-        params.interpolation.min_capacity_kwh, ceiling)
+    # NOT capped by export.max_projected_capacity_kwh. That ceiling exists to
+    # keep a projected capacity inside the composition model's answerable range;
+    # this chemistry's composition is never computed, so clipping here would only
+    # fail to meet the range target while making the mass saving look better than
+    # the assumption gives.
+    out["capacity_kwh_nominal"] = saturated.fillna(out.capacity_kwh_nominal).round(2)
     out["capacity_is_projected"] = True
     out["pack_mass_kg_implied"] = (out.capacity_kwh_nominal * 1000.0 / density).round(1)
     out["wh_per_km"] = wh_per_km
@@ -258,6 +254,15 @@ def build_unknown_rows(model: CompositionModel, params, capacities: pd.DataFrame
     base = template["based_on"]
     implied = capacities.set_index(["segment", "year"])["pack_mass_kg_implied"] \
         if "pack_mass_kg_implied" in capacities.columns else None
+
+    # Build the skeleton at a capacity the composition model will answer for.
+    # Only the component and element STRUCTURE is taken from it -- every mass is
+    # wiped below -- so the base chemistry's answerable range must not constrain
+    # a range target for a chemistry whose composition is not computed at all.
+    real_capacities = capacities.set_index(["segment", "year"])["capacity_kwh_nominal"]
+    capacities = capacities.copy()
+    capacities["capacity_kwh_nominal"] = capacities.capacity_kwh_nominal.clip(
+        params.interpolation.min_capacity_kwh, params.interpolation.max_capacity_kwh)
     removed = set(template["remove_components"])
     swaps = dict(template["element_swaps"])
 
@@ -293,6 +298,10 @@ def build_unknown_rows(model: CompositionModel, params, capacities: pd.DataFrame
     for column in [c for c in rows.columns
                    if c.startswith("mass_") or c == "kg_per_kwh"]:
         rows[column] = pd.NA
+
+    # Put the real capacity back, whatever the base chemistry could answer for.
+    rows["capacity_kwh_nominal"] = pd.MultiIndex.from_frame(
+        rows[["segment", "year"]]).map(real_capacities)
 
     if implied is not None:
         # The WHOLE PACK's mass follows from the assumed energy density and the

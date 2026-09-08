@@ -926,11 +926,23 @@ class TechnologyParams:
     apply_range_saturation: bool = True
 
     # The range a car is built for once density stops binding, in km, on the
-    # real-world consumption in EV_details.csv. 1000 km is the lower end of the
-    # "no point going further" argument; 850 km is what a one-third material
-    # saving actually corresponds to.
+    # real-world consumption in EV_details.csv. Settled at 1200: 1500 km is
+    # further than anyone drives between stops, and someone has to actually
+    # drive it for the capacity to be worth carrying.
+    #
+    # ⚠️ 1200 km AT 500 Wh/kg IS NOT A MATERIAL SAVING. It gives 0.96x today's
+    # pack mass -- the longer range spends essentially the whole density gain.
+    # The pairs that do save, on the fleet mean:
+    #
+    #     range    500 Wh/kg   600      700      800
+    #     1000 km    0.80      0.66     0.57     0.50
+    #     1200 km    0.96      0.80     0.68     0.60
+    #     1500 km    1.19      1.00     0.85     0.75
+    #
+    # Rule of thumb: mass vs today = 0.40 x (range km / pack Wh/kg). A third off
+    # at 1200 km needs about 717 Wh/kg at PACK level.
     # SAFE TO CHANGE: yes -- this is THE lever, and the mass saving follows it.
-    range_saturation_km: float = 1000.0
+    range_saturation_km: float = 1200.0
 
     # ⚠️ PACK level, not cell. Solid-state is usually quoted at cell level, and
     # the difference decides the answer: 500 Wh/kg cell with a bipolar pack at
