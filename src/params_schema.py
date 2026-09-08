@@ -725,6 +725,68 @@ class SecondLifeParams:
     returning_mix_figure_size_in: tuple[float, float] = (16.0, 9.0)
 
 
+@dataclass
+class ExportParams:
+    """
+    The composition files handed to the stock-and-flow model.
+
+    ONE FILE PER CHEMISTRY, one row per component/material/element, for ONE CAR
+    of a given segment in a given year. No chemistry mixing happens here: the
+    scenario shares are applied downstream, where the fleet numbers are. That
+    split is deliberate -- this project knows what a battery is made of, the
+    stock-and-flow model knows how many there are, and mixing the two here would
+    bake a scenario into a file that ought to outlive it.
+    """
+
+    # Where the files go, relative to the project root. Untracked like the rest
+    # of data/.
+    # SAFE TO CHANGE: yes.
+    composition_output_dir: str = "data/composition"
+
+    # Every fifth year, as agreed -- the full annual grid would be five times
+    # the rows for an interpolation that is smooth between them anyway.
+    # SAFE TO CHANGE: yes.
+    first_export_year: int = 2020
+    last_export_year: int = 2070
+    export_year_step: int = 5
+
+    # ⚠️ WHAT HAPPENS TO CAPACITY AFTER THE DATA ENDS. The fitted capacity per
+    # segment runs to 2026 and no further; everything beyond is an assumption,
+    # and this is where it is made.
+    #   'hold'   the 2026 fitted capacity, unchanged, to 2070
+    #   'trend'  continues the 2016-2026 gradient linearly
+    # 'hold' is the default because it is the assumption that adds least: pack
+    # capacity has been flattening in most segments since 2023, and continuing a
+    # decade of growth for another forty-four years would put C-segment cars at
+    # well over 100 kWh with nothing supporting it.
+    # SAFE TO CHANGE: yes -- 'trend' is there to bound the other side.
+    capacity_projection: str = "hold"
+
+    # Cap on the projected capacity, kWh, whatever the projection says. A trend
+    # continued to 2070 has to stop somewhere, and an unbounded one silently
+    # leaves the range the composition model will answer for.
+    # SAFE TO CHANGE: yes.
+    max_projected_capacity_kwh: float = 150.0
+
+    # Levels written. Each becomes its own set of rows, tagged in a 'level'
+    # column, so one file answers at whichever detail the caller needs.
+    # ⚠️ 'element' does NOT add up to 'component': batteryCellCasing and
+    # batteryCellSeparator have no element rows in the workbook, about 8% of
+    # pack mass. The files carry both levels precisely so that gap is visible
+    # rather than inferred.
+    # SAFE TO CHANGE: yes.
+    export_levels: tuple[str, ...] = ("component", "material", "element")
+
+    # Include the Monte Carlo percentile columns.
+    # SAFE TO CHANGE: yes -- dropping them makes the files smaller, not better.
+    include_uncertainty: bool = True
+
+    # 'csv' or 'xlsx'. CSV by default: these are handed to another model, and a
+    # csv is diffable, streamable and cannot carry a stale cached formula.
+    # SAFE TO CHANGE: yes.
+    export_format: str = "csv"
+
+
 # ======================================================================
 #  END OF SETTINGS.  Below here is plumbing.
 # ======================================================================
@@ -735,7 +797,7 @@ class Params:
 
     SECTIONS = ("paths", "scope", "drawing", "interpolation", "monte_carlo", "capacity_figure",
                 "ev_details", "scenarios",
-                "second_life")
+                "second_life", "export")
 
     paths: PathParams = field(default_factory=PathParams)
     scope: ScopeParams = field(default_factory=ScopeParams)
@@ -746,6 +808,7 @@ class Params:
     ev_details: EVDetailsParams = field(default_factory=EVDetailsParams)
     scenarios: ScenarioParams = field(default_factory=ScenarioParams)
     second_life: SecondLifeParams = field(default_factory=SecondLifeParams)
+    export: ExportParams = field(default_factory=ExportParams)
 
     def sheet_names(self) -> list[str]:
         """The workbook sheets in scope, in the order the capacities are listed."""
@@ -761,6 +824,18 @@ class Params:
         """The EV-database table's full path."""
         from pathlib import Path
         return Path(project_root) / self.paths.input_dir / self.ev_details.ev_details_file_name
+
+    def composition_output_path(self, project_root, file_name: str) -> "Path":
+        """Where an exported composition file goes, folder created if needed."""
+        from pathlib import Path
+        directory = Path(project_root) / self.export.composition_output_dir
+        directory.mkdir(parents=True, exist_ok=True)
+        return directory / file_name
+
+    def export_years(self) -> list[int]:
+        return list(range(self.export.first_export_year,
+                          self.export.last_export_year + 1,
+                          self.export.export_year_step))
 
     def output_path(self, project_root, file_name: str) -> "Path":
         """Where a figure goes, with the folder created if it is not there yet."""
@@ -1063,6 +1138,35 @@ class Params:
             raise ParameterError(
                 "second_life.returning_mix_file_name must end in '.png': "
                 f"{sl.returning_mix_file_name!r}")
+
+        ex = self.export
+        if ex.export_year_step < 1:
+            raise ParameterError(
+                f"export.export_year_step must be at least 1: {ex.export_year_step}")
+        if ex.first_export_year > ex.last_export_year:
+            raise ParameterError(
+                f"export.first_export_year ({ex.first_export_year}) is after "
+                f"last_export_year ({ex.last_export_year}).")
+        if ex.capacity_projection not in ("hold", "trend"):
+            raise ParameterError(
+                f"export.capacity_projection must be 'hold' or 'trend': "
+                f"{ex.capacity_projection!r}")
+        if ex.max_projected_capacity_kwh > self.interpolation.max_capacity_kwh:
+            raise ParameterError(
+                f"export.max_projected_capacity_kwh ({ex.max_projected_capacity_kwh}) "
+                f"is above interpolation.max_capacity_kwh "
+                f"({self.interpolation.max_capacity_kwh}), so the export would ask the "
+                "composition model for a capacity it refuses to answer for.")
+        unknown_levels = sorted(set(ex.export_levels) - {"component", "material", "element"})
+        if unknown_levels:
+            raise ParameterError(
+                f"export.export_levels may only contain 'component', 'material' and "
+                f"'element': {unknown_levels}")
+        if not ex.export_levels:
+            raise ParameterError("export.export_levels is empty -- nothing to write.")
+        if ex.export_format not in ("csv", "xlsx"):
+            raise ParameterError(
+                f"export.export_format must be 'csv' or 'xlsx': {ex.export_format!r}")
 
         if not sc.scenario_file_name.endswith(".png"):
             raise ParameterError(

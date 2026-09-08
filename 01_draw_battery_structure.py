@@ -213,8 +213,9 @@ def draw(cell_side: list[dict], pack_side: list[dict], params: Params) -> plt.Fi
     ax.text(0, 10.0,
             "Note: batteryPackCellTerminals is named for the pack but sits under the cell chemistry "
             "in the workbook, so it is drawn on the cell side.\n"
-            "batteryCellCasing and batteryCellSeparator carry no element breakdown at all — "
-            "reading this product at element level silently drops them.",
+            "batteryCellCasing and batteryCellSeparator carry no element breakdown at all, and "
+            "batteryCellElectrolyte itemises only its lithium — 99% of it. About 13% of cell mass "
+            "has no element rows, the electrolyte being the largest part of that.",
             fontsize=8, color="#8a3b3b", va="top")
 
     fig.tight_layout()

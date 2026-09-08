@@ -13,6 +13,22 @@ cell chemistry, with a Monte Carlo band around it.
     model = CompositionModel(params)
     model.weights_at(150.0, chemistry="battLiNMC_midNi", level="component")
 
+⚠️ ELEMENT LEVEL DOES NOT SUM TO COMPONENT LEVEL
+--------------------------------------------------
+About 13% of cell mass has no element breakdown, and it is NOT only the
+components that carry no `e-c` row at all. Worked out from the workbook, for
+NMC high-Ni at 60 kWh:
+
+    batteryCellElectrolyte   loses 99% -- only its lithium is itemised
+    batteryCellCasing        loses 100% -- no e-c rows
+    batteryCellSeparator     loses 100% -- no e-c rows
+    anodeActiveMaterial      +4% -- C plus Si slightly EXCEEDS the component total
+
+The electrolyte is the largest term by far, not the casing. Anything reading
+this product at element level alone is missing that mass silently, and
+`02_composition_by_capacity.py --level element` prints the attribution per run
+rather than repeating a remembered figure.
+
 ⚠️ WHICH kWh THIS MODEL EXPECTS
 --------------------------------
 NOMINAL capacity -- the pack's gross, stated figure. The composition workbook's

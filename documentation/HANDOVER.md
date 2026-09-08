@@ -113,10 +113,14 @@ per-capacity range.
 in fact correlated, that total band is too tight. No parameter exposes
 cross-series correlation yet.
 
-**⚠️ At element level the components do not add up.** `batteryCellCasing` and
-`batteryCellSeparator` have no `e-c` rows at all. A 150 kWh NMC battery
+**⚠️ At element level the components do not add up.** A 150 kWh NMC battery
 accounts for 626 kg at element level against 684 kg at component level — 8%
-missing, silently, unless you look. `02_composition_by_capacity.py` prints this
+missing, silently, unless you look. **The attribution is not what it first
+looks like**: `batteryCellElectrolyte` itemises only its lithium and so loses
+99% of its own mass, which is the largest single term; `batteryCellCasing` and
+`batteryCellSeparator` have no `e-c` rows at all; and `anodeActiveMaterial`'s
+elements sum to 4% MORE than the component. About 13% of cell mass, on the
+NMC high-Ni 60 kWh sheet. `02_composition_by_capacity.py` prints this
 whenever `--level element` is used. This is the strongest argument for not
 reading the product at element level alone.
 
@@ -336,6 +340,39 @@ comes back latest.
 ⚠️ The returning mix assumes **constant annual sales volume** — only shares
 exist in this project. Real volumes come from the stock-and-flow model, and
 growth means the true return mix is somewhat more modern than shown.
+
+## 5c. The composition files (`06_generate_composition_files.py`)
+
+**One file per chemistry, one row per component/material/element, for ONE CAR**
+of a given segment and year. Written to `data/composition/` (untracked), CSV.
+
+```bash
+./.venv/bin/python 06_generate_composition_files.py     # ~19 s
+```
+
+Seven files, ~4,200 rows each, plus `capacity_by_segment_year.csv`. Years 2020
+to 2070 every five. Eleven segments — JA is absent because it has 2 models, too
+few to fit a capacity.
+
+**No chemistry mixing happens here, deliberately.** The scenario shares are
+applied in the stock-and-flow model, where the fleet numbers are. This project
+knows what a battery is made of; that one knows how many there are. Baking a
+scenario into these files would tie them to an assumption they should outlive,
+and as written the same files serve all three scenarios and any later one.
+
+Columns: `chemistry, segment, year, level, layer1, branch, component, element,
+capacity_kwh_nominal, capacity_is_projected, mass_kg, kg_per_kwh, extrapolated,
+mass_p2.5, mass_p97.5, mass_mean`.
+
+**⚠️ Capacity beyond 2026 is projected**, and every row says so in
+`capacity_is_projected`. `export.capacity_projection` is `hold` by default — the
+2026 fitted capacity carried forward unchanged — because capacity has been
+flattening in most segments since 2023 and continuing a decade of growth for
+another forty-four years would put C-segment cars well over 100 kWh with nothing
+supporting it. `trend` is there to bound the other side.
+
+**⚠️ Sodium-ion and solid-state are not written**, and the run says so rather
+than substituting a lookalike.
 
 ## 6. Open questions, and who they are for
 

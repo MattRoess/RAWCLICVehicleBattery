@@ -27,6 +27,7 @@ It is the battery counterpart to `RAWCLICVehicleComposition` (whole car) and
 | `03_capacity_by_segment_over_time.py` | Battery capacity by segment and year from `EV_details.csv`, smoothed, with the market spread and a bootstrap band. One figure per capacity basis. |
 | `04_capacity_by_chemistry.py` | The same, split by cathode chemistry — LFP, NCA, NMC_middle, NMC_high — where at least 5 distinct models carry it. Prints the table too. |
 | `05_chemistry_scenarios.py` | Three chemistry scenarios to 2070, and the mix arriving for recycling once vehicle life and second life are applied. **Assumption, not data.** |
+| `06_generate_composition_files.py` | Writes the composition files for the stock-and-flow model: one file per chemistry, one row per component/material/element, **for one car**. No chemistry mixing — the split happens downstream. |
 
 `02` takes arguments:
 
@@ -94,9 +95,12 @@ well any of these numbers is known. A narrow band here means the rule was
 narrow.
 
 One consequence worth stating separately: at element level the components do not
-add up. `batteryCellCasing` and `batteryCellSeparator` have no element rows at
-all, so an element-level reading of a 150 kWh NMC battery accounts for 626 kg of
-the 684 kg the components come to — 8% missing, silently, unless you look.
+add up. An element-level reading of a 150 kWh NMC battery accounts for 626 kg of
+the 684 kg the components come to — 8% missing, silently, unless you look. And
+it is **not only** the components with no element rows: `batteryCellElectrolyte`
+itemises only its lithium, losing 99% of its own mass, which is the largest
+single term. `batteryCellCasing` and `batteryCellSeparator` lose all of theirs.
+`02_composition_by_capacity.py --level element` prints the attribution per run.
 
 ## Changing what it does
 

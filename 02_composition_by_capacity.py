@@ -211,12 +211,21 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.level == "element":
         components = model.weights_at(args.capacity, chemistry=chemistry, level="component")
+        per_component = model.weights_at(args.capacity, chemistry=chemistry, level="element")
         gap = components["mass_kg"].sum() - table["mass_kg"].sum()
         print(f"\nNOTE: the elements account for {table['mass_kg'].sum():.1f} kg of the "
               f"{components['mass_kg'].sum():.1f} kg the components come to -- {gap:.1f} kg "
-              f"({gap / components['mass_kg'].sum():.0%}) is missing because "
-              "batteryCellCasing and batteryCellSeparator have no element rows in the "
-              "workbook at all.")
+              f"({gap / components['mass_kg'].sum():.0%}) has no element breakdown.")
+        # Worked out from the data rather than asserted: the shortfall is not
+        # only the components with no element rows at all.
+        by_component = (per_component.groupby("component")["mass_kg"].sum()
+                        .reindex(components.set_index("component")["mass_kg"].index)
+                        .fillna(0.0))
+        shortfall = (components.set_index("component")["mass_kg"] - by_component).sort_values(ascending=False)
+        print("      where it goes missing:")
+        for name, value in shortfall[shortfall.abs() > 0.05].items():
+            share = value / components.set_index("component")["mass_kg"][name]
+            print(f"        {name:<26} {value:8.2f} kg ({share:+.0%} of that component)")
 
     if args.no_figures:
         return 0
