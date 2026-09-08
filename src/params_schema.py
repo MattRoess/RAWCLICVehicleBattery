@@ -815,7 +815,8 @@ class ExportParams:
     # A share of None means: the material IS present, the SPLIT is not known.
     # Those rows are written with the material named and the mass left empty,
     # marked 'material_known_split_unknown'. Give real fractions -- they must sum
-    # to 1 -- and the component's mass is divided among them instead.
+    # to 1 -- and the component's mass is divided among them instead, which is
+    # what the casing now does: 40% aluminium, 60% plastics, supplied 2026-09-08.
     #
     # NOTE that 'plastics' is a material, not an element: it will never appear at
     # element level. Resolving the casing at element level needs the polymer
@@ -824,7 +825,7 @@ class ExportParams:
     # SAFE TO CHANGE: yes -- this is exactly the parameter to edit when the
     # aluminium-to-plastics ratio is known.
     component_material_overrides: dict[str, dict] = field(default_factory=lambda: {
-        "batteryCellCasing": {"Al": None, "plastics": None},
+        "batteryCellCasing": {"Al": 0.40, "plastics": 0.60},
     })
 
     # WRITE A FILE FOR THE CHEMISTRIES WITH NO COMPOSITION TOO -- sodium-ion and

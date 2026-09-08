@@ -178,7 +178,7 @@ component level — 8% missing. The attribution is not the obvious one:
 | component | lost at element level | why |
 |---|---|---|
 | `batteryCellElectrolyte` | **99% of its own mass** | only its lithium is itemised |
-| `batteryCellCasing` | 100% | no element rows at all |
+| `batteryCellCasing` | 100% | no element rows at all — its materials are now known (40% Al, 60% plastics) but `plastics` is not an element, so only the aluminium could ever be resolved here |
 | `batteryCellSeparator` | 100% | no element rows at all |
 | `anodeActiveMaterial` | −4% | C plus Si *exceed* the component total |
 
@@ -379,7 +379,7 @@ same nine files serve all three scenarios and any later one.
 | value | meaning |
 |---|---|
 | `from_workbook` | a real number from the composition workbook |
-| `material_known_split_unknown` | the materials are named but the split between them is not — mass empty |
+| `material_known_split_unknown` | the materials are named but the split between them is not — mass empty. **Currently unused**: the only such case, the cell casing, now has its split |
 | `unknown` | the chemistry has no composition at all — every mass empty |
 
 ### 6.2 ⚠️ Capacity beyond 2026 is projected
@@ -515,7 +515,7 @@ empty mass or not.
 | Sodium-ion has no composition | whole chemistry | §6.3 |
 | Bipolar solid-state has no composition | whole chemistry | §6.3 |
 | Element level does not sum to component level | ~13% of cell mass, mostly the electrolyte | §3.5 |
-| `batteryCellCasing` materials named (Al + plastics) but the split unknown | ~0.08 kg/kWh | §6.1 |
+| `plastics` in the cell casing has no element breakdown (needs C/H/O) | ~0.05 kg/kWh, the 60% plastics share | §3.5 |
 | The ±10% uncertainty is a convention, not a measurement | all of it | §3.3 |
 | Capacity beyond 2026 is projected | 82% of exported rows | §6.2 |
 | Everything after 2026 in the scenarios is judgement | all of it | §5 |
@@ -535,8 +535,6 @@ column, or stated on the figure that depends on it.
 
 ## 8. Open questions
 
-1. **The aluminium-to-plastics ratio for the cell casing.** One parameter edit
-   fills it into every file.
 1. **Is the 500 Wh/kg solid-state figure cell or pack?** It decides whether the
    material saving is a quarter or nothing (§6.3).
 1. **The cell-to-pack ratio for a bipolar solid-state pack.** 0.80 is assumed
