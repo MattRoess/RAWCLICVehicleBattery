@@ -416,6 +416,20 @@ class EVDetailsParams:
     first_year: int = 2015
     last_year: int = 2026
 
+    # WHEN A SEGMENT HAS TOO FEW MODELS TO FIT A CURVE, fall back rather than
+    # dropping it -- all twelve segments must appear in the exported files, even
+    # ones the market barely populates.
+    #   'segment_median'  the median capacity of that segment's own models. Real
+    #                     data, just thin. JA has two (Hyundai INSTER, 42 and 49
+    #                     kWh nominal), so its median is 45.5.
+    #   'reference_map'   reference_battery_size_map. Last resort, for a segment
+    #                     with no models at all. Note the map says 25 kWh for JA
+    #                     against those cars' 45.5, so it is the worse source
+    #                     wherever real models exist.
+    # Every exported row carries capacity_source saying which was used.
+    # SAFE TO CHANGE: yes.
+    capacity_fallback: str = "segment_median"
+
     # A segment-year with fewer models than this is dropped rather than drawn:
     # a median of two cars is a coincidence, not a trend.
     # SAFE TO CHANGE: yes. Below 3 the lines get noisy.
@@ -926,23 +940,34 @@ class TechnologyParams:
     apply_range_saturation: bool = True
 
     # The range a car is built for once density stops binding, in km, on the
-    # real-world consumption in EV_details.csv. Settled at 1200: 1500 km is
-    # further than anyone drives between stops, and someone has to actually
-    # drive it for the capacity to be worth carrying.
+    # real-world consumption in EV_details.csv.
     #
-    # ⚠️ 1200 km AT 500 Wh/kg IS NOT A MATERIAL SAVING. It gives 0.96x today's
-    # pack mass -- the longer range spends essentially the whole density gain.
-    # The pairs that do save, on the fleet mean:
+    # SETTLED AT 600 km, and the reason is charging speed rather than range.
+    # A cap only bites if it sits below where the market would otherwise go, and
+    # today's median real range is already ~490 km -- so 1200 km would not have
+    # restrained anything, it would have mandated a 2.4x increase and produced
+    # 233 kWh packs, 65% larger than anything in the vehicle table. At 350 kW a
+    # 600 km car refills in about fifteen minutes, which is why real ranges have
+    # plateaued at 400-600 km instead of climbing: it is cheaper to charge
+    # faster than to carry more. Fast charging substitutes for capacity, and
+    # that substitution is what makes the material saving real.
+    #
+    # At 600 km and 500 Wh/kg the pack is 0.48x today's mass -- the density gain
+    # is taken as material rather than as range. Compare 1200 km, which gives
+    # 0.96x: no saving at all.
+    #
+    # The pairs, on the fleet mean:
     #
     #     range    500 Wh/kg   600      700      800
+    #      600 km    0.48      0.40     0.34     0.30
+    #      800 km    0.64      0.53     0.46     0.40
     #     1000 km    0.80      0.66     0.57     0.50
     #     1200 km    0.96      0.80     0.68     0.60
     #     1500 km    1.19      1.00     0.85     0.75
     #
-    # Rule of thumb: mass vs today = 0.40 x (range km / pack Wh/kg). A third off
-    # at 1200 km needs about 717 Wh/kg at PACK level.
+    # Rule of thumb: mass vs today = 0.40 x (range km / pack Wh/kg).
     # SAFE TO CHANGE: yes -- this is THE lever, and the mass saving follows it.
-    range_saturation_km: float = 1200.0
+    range_saturation_km: float = 600.0
 
     # ⚠️ PACK level, not cell. Solid-state is usually quoted at cell level, and
     # the difference decides the answer: 500 Wh/kg cell with a bipolar pack at
@@ -1189,6 +1214,10 @@ class Params:
             raise ParameterError(
                 f"ev_details.first_year ({ev.first_year}) must be below last_year "
                 f"({ev.last_year}).")
+        if ev.capacity_fallback not in ("segment_median", "reference_map"):
+            raise ParameterError(
+                f"ev_details.capacity_fallback must be 'segment_median' or "
+                f"'reference_map': {ev.capacity_fallback!r}")
         if ev.min_models_per_year < 1:
             raise ParameterError(
                 f"ev_details.min_models_per_year must be at least 1: "

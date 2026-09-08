@@ -75,16 +75,36 @@ def segment_capacities(params, ev: EVDetails, segments: list[str]) -> pd.DataFra
     rows = []
 
     for segment in segments:
+        fitted = pd.Series(dtype=float)
         try:
             curve = ev.curve(segment)
+            fitted = pd.Series(curve.central, index=curve.years.astype(int)).dropna()
         except EVDetailsError:
-            print(f"[export] segment {segment}: no models at all -- skipped.")
-            continue
+            pass
 
-        fitted = pd.Series(curve.central, index=curve.years.astype(int)).dropna()
         if fitted.empty:
-            print(f"[export] segment {segment}: too few models to fit a capacity "
-                  f"-- skipped (this is why JA is absent).")
+            # Too thin to fit a curve, but the segment still has to be exported:
+            # all twelve appear in the stock-and-flow model whatever the EV
+            # database knows about them.
+            own = ev.models.loc[ev.models.segment == segment, "capacity_kwh"].dropna()
+            if params.ev_details.capacity_fallback == "segment_median" and len(own):
+                value, source = float(own.median()), "segment_median"
+                print(f"[export] segment {segment}: too few models to fit a curve "
+                      f"({len(own)}); using their median, {value:.1f} kWh.")
+            else:
+                value = params.ev_details.reference_battery_size_map.get(segment)
+                source = "reference_map"
+                if value is None:
+                    print(f"[export] segment {segment}: no models and no map entry "
+                          "-- skipped.")
+                    continue
+                print(f"[export] segment {segment}: no usable models; using "
+                      f"battery_size_map, {value:g} kWh.")
+            for year in years:
+                rows.append({"segment": segment, "year": year,
+                             "capacity_kwh_nominal": round(float(value), 2),
+                             "capacity_is_projected": True,
+                             "capacity_source": source})
             continue
 
         last_year = int(fitted.index.max())
@@ -109,7 +129,8 @@ def segment_capacities(params, ev: EVDetails, segments: list[str]) -> pd.DataFra
                                      export.max_projected_capacity_kwh))
             rows.append({"segment": segment, "year": year,
                          "capacity_kwh_nominal": round(capacity, 2),
-                         "capacity_is_projected": projected})
+                         "capacity_is_projected": projected,
+                         "capacity_source": "fitted"})
     return pd.DataFrame(rows)
 
 
@@ -126,14 +147,15 @@ def build_rows(model: CompositionModel, params, capacities: pd.DataFrame,
             table.insert(0, "year", entry.year)
             table.insert(0, "segment", entry.segment)
             table["capacity_is_projected"] = entry.capacity_is_projected
+            table["capacity_source"] = entry.capacity_source
             frames.append(table)
 
     rows = pd.concat(frames, ignore_index=True)
     rows = rows.rename(columns={"capacity_kwh": "capacity_kwh_nominal",
                                 "chemistry": "layer1"})
     keep = ["segment", "year", "level", "layer1", "branch", "component", "element",
-            "capacity_kwh_nominal", "capacity_is_projected", "mass_kg", "kg_per_kwh",
-            "extrapolated"]
+            "capacity_kwh_nominal", "capacity_is_projected", "capacity_source",
+            "mass_kg", "kg_per_kwh", "extrapolated"]
     if export.include_uncertainty:
         keep += [c for c in rows.columns if c.startswith("mass_p") or c == "mass_mean"]
     rows["chemistry"] = chemistry

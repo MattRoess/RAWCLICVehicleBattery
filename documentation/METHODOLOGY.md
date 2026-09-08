@@ -18,7 +18,7 @@ here, not remembered.*
 | | |
 |---|---|
 | **Inputs** | `BATT_consolidated_composition.xlsx` (what a battery is made of, per kWh) and `EV_details.csv` (1,326 real BEV variants: segment, capacity, chemistry, years on sale) |
-| **Outputs** | Nine CSV files — one per chemistry — giving the material content of **one car's battery** by segment, year and level of detail |
+| **Outputs** | Nine CSV files — one per chemistry — giving the material content of **one car's battery** for all **12 segments**, by year and level of detail, with Monte Carlo percentiles on every value |
 | **Who splits the fleet** | Not this project. The chemistry mix is applied downstream in the stock-and-flow model, where the vehicle counts are |
 | **Horizon** | 2020–2070, every fifth year |
 | **The biggest caveat** | Two of the nine chemistries — sodium-ion and solid-state — have **no composition data at all**. Their files are written with every mass empty and marked `unknown` |
@@ -353,8 +353,20 @@ capacity_kwh_nominal, capacity_is_projected, mass_kg, kg_per_kwh, extrapolated,
 mass_p2.5, mass_p97.5, mass_mean, composition_status, note
 ```
 
-11 segments × 11 years (2020–2070, every fifth) × three levels. JA is absent — 2
-models cannot fit a capacity.
+**All 12 segments** × 11 years (2020–2070, every fifth) × three levels, and
+**Monte Carlo percentiles on every computed value** (`mass_p2.5`, `mass_p97.5`,
+`mass_mean` — 100% populated wherever a mass exists).
+
+`capacity_source` says where each segment's capacity came from:
+
+| value | meaning |
+|---|---|
+| `fitted` | the smoothed curve from `03` — 11 segments |
+| `segment_median` | too few models to fit; the median of that segment's own cars. **JA only**: two Hyundai INSTER variants at 42 and 49 kWh, median 45.5 |
+| `reference_map` | last resort, `battery_size_map`, for a segment with no models at all. Currently unused |
+
+JA is worth a note: `battery_size_map` puts it at 25 kWh, against 45.5 for the
+two cars that actually exist in it. The thin real data is the better source.
 
 **No chemistry mixing happens here, by design.** The scenario shares are applied
 in the stock-and-flow model, where the fleet numbers are. This project knows what
@@ -388,60 +400,56 @@ Once energy density stops binding, a battery is no longer as big as you can
 afford to carry. There is no point carrying range nobody drives, so the pack is
 sized for a **range target** and every further gain in density shows up as
 **less mass**. `technology.range_saturation_km` is the input; the mass saving is
-what falls out.
+what falls out of it. Setting both would be over-determined, and the range is
+the half with a physical argument behind it.
 
-**⚠️ A 1000–1500 km range and a one-third material saving are not both
-achievable — the arithmetic decides between them.** Using this project's own
-numbers: today's real range is 220–667 km by segment (median ~490) at 118–215
-Wh/kg pack, and real consumption is 132 Wh/km in A rising to 194 in JF. At
-**500 Wh/kg pack**:
+**The settled assumption is 600 km at 500 Wh/kg pack**, and the reason is
+charging speed rather than range. A cap only bites if it sits below where the
+market would otherwise go — and today's median real range is already ~490 km.
+A 1200 km target would not restrain anything; it would mandate a 2.4× increase
+and produce 233 kWh packs, 65% larger than anything in the vehicle table. At
+350 kW a 600 km car refills in about fifteen minutes, which is why real ranges
+have plateaued at 400–600 km rather than climbing: **it is cheaper to charge
+faster than to carry more.** Fast charging substitutes for capacity, and that
+substitution is what makes the material saving real.
 
-Mass relative to today, fleet mean across the eleven segments:
+Pack mass relative to today, fleet mean over the twelve segments:
 
-| pack Wh/kg | 600 km | 1000 km | **1200 km** | 1500 km |
-|---|---|---|---|---|
-| 400 | 0.60 | 1.00 | 1.19 | 1.49 |
-| **500** *(default)* | 0.48 | 0.80 | **0.96** | 1.19 |
-| 600 | 0.40 | 0.66 | 0.80 | 1.00 |
-| 700 | 0.34 | 0.57 | 0.68 | 0.85 |
-| 800 | 0.30 | 0.50 | 0.60 | 0.75 |
+| pack Wh/kg | **600 km** | 800 km | 1000 km | 1200 km | 1500 km |
+|---|---|---|---|---|---|
+| 400 | 0.60 | 0.80 | 1.00 | 1.19 | 1.49 |
+| **500** *(default)* | **0.48** | 0.64 | 0.80 | 0.96 | 1.19 |
+| 600 | 0.40 | 0.53 | 0.66 | 0.80 | 1.00 |
+| 700 | 0.34 | 0.46 | 0.57 | 0.68 | 0.85 |
+| 800 | 0.30 | 0.40 | 0.50 | 0.60 | 0.75 |
 
 **Rule of thumb: mass vs today ≈ 0.40 × (range km ÷ pack Wh/kg).** It reproduces
-every cell above.
+every cell above, and lets any other pair be checked without rerunning anything.
 
-**The settled assumption is 1200 km at 500 Wh/kg pack, and it is very nearly no
-material saving at all — 0.96× today's mass.** The longer range spends almost the
-whole density gain. Per segment it runs 0.78× (F) to 1.29× (A). What each outcome
-needs, fleet mean:
+Under the default, solid-state packs run **79 kWh in A to 116 kWh in JF, at 158
+to 233 kg — 0.39× to 0.64× today's mass, mean ~0.48.** Those capacities sit
+inside the range of packs already on sale, which a 1200 km target did not.
 
-| | 1000 km | 1200 km | 1500 km |
-|---|---|---|---|
-| same mass as today | 398 Wh/kg | 478 | 597 |
-| **one third off** | 597 | **717** | 896 |
-| half off | 796 | 956 | 1194 |
+Three things this exposes, all of which survived the change of target:
 
-So the one-third saving first proposed needs about **717 Wh/kg at pack level** at
-this range. A third off at 1500 km would need ~900 Wh/kg pack, which is beyond
-any lithium chemistry.
-
-Segment A gets *heavier* under every combination that keeps a long range: 1.29× at
-1200 km, and still 0.80× at 1000 Wh/kg and 1500 km — the worst in the fleet. A
-small car with a long-range pack is always carrying a battery out of proportion
-to itself.
-
-**⚠️ And 500 Wh/kg must be a PACK figure for this to hold.** Solid-state is
-usually quoted at cell level. At 500 Wh/kg cell with a bipolar pack packing at
-~0.8, the pack is 400 Wh/kg — and a 1000 km car is then **0.81–1.34× today's
-mass**, barely a saving at all.
+- **The two halves of the original proposal cannot both hold.** A third off the
+  material and a 1000–1500 km range are mutually exclusive: at 1200 km, 500 Wh/kg
+  gives 0.96× — no saving — and a third off would need ~717 Wh/kg pack. At
+  1500 km it would need ~900 Wh/kg, beyond any lithium chemistry.
+- **⚠️ 500 Wh/kg must be a PACK figure.** Solid-state is usually quoted at cell
+  level. At 500 cell with a bipolar pack packing at ~0.8 the pack is 400 Wh/kg,
+  and the saving at 600 km falls from 0.48× to 0.60×.
+- **Segment A saves least, always** — 0.64× here, and it is the only segment that
+  ever goes *above* 1.0 at longer targets. A small car carrying a long-range pack
+  is always a battery out of proportion to itself.
 
 The consumption figures are **mild-weather** medians of models introduced from
-2022. The cold-weather column is about 35% higher, so a car built for 1000 km in
-January is a third bigger again.
+2022 (132 Wh/km in A to 194 in JF). The cold-weather column is about 35% higher,
+which is equivalent to cutting density by a quarter: a 600 km pack sized for
+January is a third bigger.
 
-Under the default — 1200 km at 500 Wh/kg pack — solid-state packs run 158 kWh in
-A to 233 kWh in JF, at 317 to 466 kg. Those rows carry `pack_mass_kg_implied`:
-**a whole-pack figure, not a composition.** No component's mass is stated,
-because none is known.
+Those rows carry `pack_mass_kg_implied` — **a whole-pack figure, not a
+composition.** No component's mass is stated, because none is known.
 
 ### 6.4 ⚠️ Sodium-ion and solid-state have no composition
 
@@ -485,7 +493,8 @@ empty mass or not.
 | Models, not registrations | all vehicle-table results | §4.2 |
 | Returning mix assumes constant sales volume | all outflow results | §5.1 |
 | Cross-component error correlation not modelled | pack-level band too tight | §3.3 |
-| At the settled 1200 km and 500 Wh/kg, there is essentially **no** material saving (0.96×) | a third off would need ~717 Wh/kg pack | §6.3 |
+| A third off the material and a 1000–1500 km range are mutually exclusive | at 1200 km, 500 Wh/kg saves nothing | §6.3 |
+| JA's capacity rests on two cars | 1 of 12 segments | §6 |
 | 500 Wh/kg at cell rather than pack level would nearly erase the saving | 0.81–1.34× today instead of 0.61–1.07× | §6.3 |
 
 None of these is hidden in the code. Each is printed at runtime, marked in a
@@ -499,8 +508,8 @@ column, or stated on the figure that depends on it.
    fills it into every file.
 1. **Is the 500 Wh/kg solid-state figure cell or pack?** It decides whether the
    material saving is a quarter or nothing (§6.3).
-1. **Is 500 Wh/kg the right density?** At the settled 1200 km it yields no
-   saving; 717 Wh/kg pack would be needed for the one-third reduction.
+1. **Is 500 Wh/kg cell or pack?** Pack is assumed. At cell level the saving at
+   600 km falls from 0.48× to 0.60×.
 2. **Compositions for sodium-ion and bipolar solid-state** — including which
    components cease to exist, not just new numbers.
 3. **Does pack mass really keep rising linearly above 100 kWh?** The straight line
