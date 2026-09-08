@@ -550,6 +550,181 @@ class EVDetailsParams:
     capacity_by_chemistry_figure_size_in: tuple[float, float] = (17.0, 8.5)
 
 
+@dataclass
+class ScenarioParams:
+    """
+    Cathode-chemistry mix to 2070, as three scenarios.
+
+    ⚠️ THE SHARE NUMBERS BELOW ARE A DRAFT JUDGEMENT, NOT A RESULT. Nothing
+    derives them from data -- the data ends in 2026. They are written here to be
+    argued with and corrected, and every figure built from them says so.
+
+    Shares are given at ANCHOR YEARS and interpolated between; before the first
+    anchor and after the last they are held flat. Each segment group's shares
+    are normalised to 1, so a set that does not add up is corrected rather than
+    silently scaled.
+
+    THE CHINA ASSUMPTION IS BUILT INTO THE ANCHORS, not modelled separately.
+    Chinese-built BEVs are expected to approach half the EU market within a
+    decade, which is what carries LFP and later sodium into the mainstream
+    segments this fast. If that share stalls, every LFP and Na trajectory here
+    is too fast, and the NMC ones too slow.
+    """
+
+    # Segment groups the scenarios are written against. The whole chemistry
+    # story is a size story -- cheap small cars take the cheap chemistry first
+    # -- so shares are set per group rather than per segment.
+    # SAFE TO CHANGE: yes, but every segment must appear in exactly one group.
+    segment_groups: dict[str, tuple[str, ...]] = field(default_factory=lambda: {
+        "small": ("A", "B", "JA", "JB"),
+        "medium": ("C", "D", "JC", "JD"),
+        "large": ("E", "F", "JE", "JF"),
+    })
+
+    # The years the shares are pinned at. Between them the mix is interpolated.
+    # SAFE TO CHANGE: yes -- add anchors where a scenario needs a turn.
+    anchor_years: tuple[int, ...] = (2025, 2035, 2050, 2070)
+
+    # ⚠️ CHEMISTRIES WITH NO COMPOSITION DATA. The workbook has LFP, LMFP, LMO,
+    # NCA and three NMC grades -- and nothing for sodium-ion or solid-state.
+    # They are NOT variants of what is there: sodium replaces the copper anode
+    # collector with aluminium, and bipolar solid-state deletes the separator,
+    # the liquid electrolyte and the per-cell terminals outright. So a scenario
+    # can state their SHARE, but no material mass can be computed for them until
+    # a composition is supplied. Every output marks the gap rather than
+    # substituting a lookalike.
+    # SAFE TO CHANGE: remove a name once its composition exists.
+    chemistries_without_composition: tuple[str, ...] = ("Na_ion", "solid_state")
+
+    # SCENARIO 1 -- "LFP volume, NMC premium", kept as a specific case.
+    # Today's structure extrapolated: LFP and LMFP take the volume segments, NMC
+    # high-Ni holds the long-range premium, nothing new arrives. Useful as the
+    # no-surprises reference, not as a forecast: 45 years with no new chemistry
+    # has no precedent.
+    # SAFE TO CHANGE: yes -- these are shares in %, per anchor year.
+    scenario_1: dict[str, dict[str, tuple[float, ...]]] = field(default_factory=lambda: {
+        "small":  {"LFP": (70, 65, 60, 60), "LMFP": (18, 25, 33, 35), "NMC_high": (12, 10, 7, 5)},
+        "medium": {"LFP": (50, 45, 42, 40), "LMFP": (22, 32, 42, 45), "NMC_high": (28, 23, 16, 15)},
+        "large":  {"LFP": (8, 10, 10, 10), "LMFP": (17, 25, 32, 35), "NMC_high": (75, 65, 58, 55)},
+    })
+
+    # SCENARIO 2 -- sodium enters, NMC becomes a NICHE rather than disappearing.
+    # Reframed deliberately: eliminating NMC by 2035 is the least defensible
+    # clause anyone proposed here, since Korean and European cell capacity is
+    # committed to it and long-range premium demand does not vanish. Shrinking
+    # it to a few per cent keeps the material story -- sodium's aluminium anode
+    # collector removing better than half the pack's copper -- without resting
+    # on a clause likely to be wrong.
+    # SAFE TO CHANGE: yes.
+    scenario_2: dict[str, dict[str, tuple[float, ...]]] = field(default_factory=lambda: {
+        "small":  {"Na_ion": (2, 40, 60, 68), "LFP": (68, 40, 25, 20),
+                   "LMFP": (18, 15, 12, 10), "NMC_high": (12, 5, 3, 2)},
+        "medium": {"Na_ion": (0, 12, 20, 24), "LFP": (50, 48, 42, 38),
+                   "LMFP": (22, 32, 34, 35), "NMC_high": (28, 8, 4, 3)},
+        "large":  {"Na_ion": (0, 3, 8, 10), "LFP": (8, 18, 24, 25),
+                   "LMFP": (17, 49, 58, 57), "NMC_high": (75, 30, 10, 8)},
+    })
+
+    # SCENARIO 3 -- scenario 2, with bipolar solid-state arriving LATER than
+    # first proposed. 2035 for mass-market bipolar solid-state is the optimistic
+    # end of every roadmap worth trusting, so it enters from 2040 and takes the
+    # large segments first, where the energy density is worth the cost.
+    # SAFE TO CHANGE: yes.
+    scenario_3: dict[str, dict[str, tuple[float, ...]]] = field(default_factory=lambda: {
+        "small":  {"solid_state": (0, 0, 15, 35), "Na_ion": (2, 40, 52, 45),
+                   "LFP": (68, 40, 20, 12), "LMFP": (18, 15, 11, 7), "NMC_high": (12, 5, 2, 1)},
+        "medium": {"solid_state": (0, 0, 28, 50), "Na_ion": (0, 12, 15, 14),
+                   "LFP": (50, 48, 30, 18), "LMFP": (22, 32, 25, 17), "NMC_high": (28, 8, 2, 1)},
+        "large":  {"solid_state": (0, 2, 45, 70), "Na_ion": (0, 3, 5, 5),
+                   "LFP": (8, 18, 12, 6), "LMFP": (17, 49, 33, 17), "NMC_high": (75, 28, 5, 2)},
+    })
+
+    # Plain-language label and a likelihood, carried onto every figure so a
+    # scenario is never read as a forecast. The probabilities are a judgement
+    # about the distinguishing clause of each, and scenarios 2 and 3 are NOT
+    # independent -- 3 is 2 plus a later step.
+    # SAFE TO CHANGE: yes.
+    scenario_labels: dict[str, str] = field(default_factory=lambda: {
+        "scenario_1": "S1 · LFP volume, NMC premium, nothing new — reference case (~10% to hold to 2070)",
+        "scenario_2": "S2 · sodium enters, NMC shrinks to a niche (~55%)",
+        "scenario_3": "S3 · S2 plus bipolar solid-state from 2040 (~40% by 2050)",
+    })
+
+    # Colour per chemistry across the scenario figures. LFP/NCA/NMC match the
+    # ev_details colours so the observed and projected figures read together.
+    # SAFE TO CHANGE: yes -- presentation only.
+    scenario_colours: dict[str, str] = field(default_factory=lambda: {
+        "LFP": "#2f8f5b", "LMFP": "#7fbf7b", "NMC_high": "#1f5f8b",
+        "NMC_middle": "#e08214", "NCA": "#b07aa1",
+        "Na_ion": "#d9a441", "solid_state": "#6a51a3",
+    })
+
+    # SAFE TO CHANGE: yes. Keep the .png suffix.
+    scenario_file_name: str = "chemistry_scenarios_to_2070.png"
+    scenario_figure_size_in: tuple[float, float] = (16.0, 9.0)
+
+
+@dataclass
+class SecondLifeParams:
+    """
+    What happens between a battery leaving the car and reaching the recycler.
+
+    This is the only part of the scenario work that touches the OUTFLOW, and it
+    is where the scenarios actually differ for a recycling model. A chemistry's
+    share of new sales in 2050 says nothing about 2050's recovered material: the
+    packs arriving then were sold around 2035, and the ones that went to
+    stationary storage first arrive later still, or not at all within the horizon.
+    """
+
+    # Turn the whole second-life delay off to see the mix that would return if
+    # every pack went straight from the car to the recycler.
+    # SAFE TO CHANGE: yes.
+    enabled: bool = True
+
+    # Years from sale to the car being scrapped. The stock-and-flow model has a
+    # proper distribution of lifetimes; this is a single figure, enough to place
+    # the return mix within a year or two, and not a substitute for it.
+    # SAFE TO CHANGE: yes.
+    vehicle_lifetime_years: int = 15
+
+    # HOW MUCH LONGER A SECOND-LIFE PACK LIVES, in years, before it reaches the
+    # recycler. Given as a range because it is one: 15 to 20 more years is the
+    # working assumption, and the two ends are carried through as a band rather
+    # than averaged away.
+    # SAFE TO CHANGE: yes.
+    second_life_extra_years_min: int = 15
+    second_life_extra_years_max: int = 20
+
+    # ⚠️ THE FRACTION OF PACKS THAT GO TO SECOND LIFE AT ALL, per chemistry --
+    # NOT all of them. LFP is highest: it is the chemistry stationary storage
+    # actually wants, being cheap, long-cycling and thermally forgiving, and it
+    # is worth least as scrap, so the pull is strong at both ends. NMC is worth
+    # more to a recycler than to a storage operator, so less of it is diverted.
+    # A chemistry absent from this map is never diverted.
+    # SAFE TO CHANGE: yes -- this is a genuine unknown and the single parameter
+    # most worth varying. Everything from 0 to ~0.6 for LFP is arguable.
+    second_life_share: dict[str, float] = field(default_factory=lambda: {
+        "LFP": 0.35,
+        "LMFP": 0.30,
+        "Na_ion": 0.25,
+        "NMC_high": 0.10,
+        "NMC_middle": 0.10,
+        "NCA": 0.05,
+        "solid_state": 0.15,
+    })
+
+    # Packs that are lost, exported or otherwise never reach a European
+    # recycler, as a fraction of what leaves the fleet. Applied evenly across
+    # chemistries: nothing suggests it is chemistry-specific, and pretending to
+    # know that it is would be worse than saying so here.
+    # SAFE TO CHANGE: yes.
+    unrecovered_share: float = 0.0
+
+    # SAFE TO CHANGE: yes. Keep the .png suffix.
+    returning_mix_file_name: str = "chemistry_returning_for_recycling.png"
+    returning_mix_figure_size_in: tuple[float, float] = (16.0, 9.0)
+
+
 # ======================================================================
 #  END OF SETTINGS.  Below here is plumbing.
 # ======================================================================
@@ -559,7 +734,8 @@ class Params:
     """Every setting, in one object."""
 
     SECTIONS = ("paths", "scope", "drawing", "interpolation", "monte_carlo", "capacity_figure",
-                "ev_details")
+                "ev_details", "scenarios",
+                "second_life")
 
     paths: PathParams = field(default_factory=PathParams)
     scope: ScopeParams = field(default_factory=ScopeParams)
@@ -568,6 +744,8 @@ class Params:
     monte_carlo: MonteCarloParams = field(default_factory=MonteCarloParams)
     capacity_figure: CapacityFigureParams = field(default_factory=CapacityFigureParams)
     ev_details: EVDetailsParams = field(default_factory=EVDetailsParams)
+    scenarios: ScenarioParams = field(default_factory=ScenarioParams)
+    second_life: SecondLifeParams = field(default_factory=SecondLifeParams)
 
     def sheet_names(self) -> list[str]:
         """The workbook sheets in scope, in the order the capacities are listed."""
@@ -804,6 +982,92 @@ class Params:
             raise ParameterError(
                 "ev_details.min_models_per_chemistry_cell must be at least 1: "
                 f"{ev.min_models_per_chemistry_cell}")
+        sc = self.scenarios
+        grouped_segments = [seg for group in sc.segment_groups.values() for seg in group]
+        if len(grouped_segments) != len(set(grouped_segments)):
+            raise ParameterError(
+                "a segment appears in more than one scenarios.segment_groups entry -- "
+                "its share would be counted twice.")
+        if len(sc.anchor_years) < 2:
+            raise ParameterError(
+                f"scenarios.anchor_years needs at least two years: {sc.anchor_years}")
+        if list(sc.anchor_years) != sorted(sc.anchor_years):
+            raise ParameterError(
+                f"scenarios.anchor_years must ascend: {sc.anchor_years}")
+        for name in ("scenario_1", "scenario_2", "scenario_3"):
+            definition = getattr(sc, name)
+            if name not in sc.scenario_labels:
+                raise ParameterError(f"no scenarios.scenario_labels entry for {name!r}.")
+            missing_groups = sorted(set(sc.segment_groups) - set(definition))
+            if missing_groups:
+                raise ParameterError(
+                    f"scenarios.{name} has no shares for segment group(s) "
+                    f"{missing_groups}.")
+            for group, chemistries in definition.items():
+                if group not in sc.segment_groups:
+                    raise ParameterError(
+                        f"scenarios.{name} sets shares for {group!r}, which is not a "
+                        f"segment group ({sorted(sc.segment_groups)}).")
+                for chemistry, shares in chemistries.items():
+                    if chemistry not in sc.scenario_colours:
+                        raise ParameterError(
+                            f"no scenarios.scenario_colours entry for {chemistry!r} "
+                            f"(used in {name}.{group}).")
+                    if len(shares) != len(sc.anchor_years):
+                        raise ParameterError(
+                            f"scenarios.{name}.{group}.{chemistry} has {len(shares)} "
+                            f"shares but there are {len(sc.anchor_years)} anchor years.")
+                    if any(share < 0 for share in shares):
+                        raise ParameterError(
+                            f"negative share in scenarios.{name}.{group}.{chemistry}: "
+                            f"{shares}")
+                totals = [sum(shares[i] for shares in chemistries.values())
+                          for i in range(len(sc.anchor_years))]
+                far_off = [(year, total) for year, total in zip(sc.anchor_years, totals)
+                           if abs(total - 100) > 5]
+                if far_off:
+                    raise ParameterError(
+                        f"scenarios.{name}.{group} shares are meant to be percentages "
+                        f"of that group's market and are far from 100 at {far_off}. "
+                        "Small drift is normalised away; this is too big to be a "
+                        "rounding slip.")
+        sl = self.second_life
+        if sl.vehicle_lifetime_years < 1:
+            raise ParameterError(
+                f"second_life.vehicle_lifetime_years must be at least 1: "
+                f"{sl.vehicle_lifetime_years}")
+        if sl.second_life_extra_years_min > sl.second_life_extra_years_max:
+            raise ParameterError(
+                f"second_life.second_life_extra_years_min "
+                f"({sl.second_life_extra_years_min}) is above the max "
+                f"({sl.second_life_extra_years_max}).")
+        if sl.second_life_extra_years_min < 0:
+            raise ParameterError(
+                "second_life.second_life_extra_years_min cannot be negative: "
+                f"{sl.second_life_extra_years_min}")
+        bad_shares = {name: value for name, value in sl.second_life_share.items()
+                      if not 0 <= value <= 1}
+        if bad_shares:
+            raise ParameterError(
+                f"second_life.second_life_share values are fractions and must be in "
+                f"[0, 1]: {bad_shares}")
+        unknown = sorted(set(sl.second_life_share) - set(sc.scenario_colours))
+        if unknown:
+            raise ParameterError(
+                f"second_life.second_life_share names chemistries that appear in no "
+                f"scenario: {unknown}")
+        if not 0 <= sl.unrecovered_share < 1:
+            raise ParameterError(
+                f"second_life.unrecovered_share must be in [0, 1): {sl.unrecovered_share}")
+        if not sl.returning_mix_file_name.endswith(".png"):
+            raise ParameterError(
+                "second_life.returning_mix_file_name must end in '.png': "
+                f"{sl.returning_mix_file_name!r}")
+
+        if not sc.scenario_file_name.endswith(".png"):
+            raise ParameterError(
+                f"scenarios.scenario_file_name must end in '.png': {sc.scenario_file_name!r}")
+
         if "{basis}" not in ev.capacity_by_chemistry_file_name:
             raise ParameterError(
                 "ev_details.capacity_by_chemistry_file_name must contain '{basis}': "

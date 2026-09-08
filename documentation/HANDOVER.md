@@ -280,6 +280,63 @@ Run, verified, not yet in any script:
 
 ---
 
+## 5b. Chemistry scenarios to 2070 (`05_chemistry_scenarios.py`)
+
+**⚠️ Everything after 2026 is assumption.** The share numbers in
+`scenarios.scenario_1/2/3` are a written-down judgement, not a result, and are
+meant to be argued with. Both figures say so on their face.
+
+| scenario | what it says | likelihood |
+|---|---|---|
+| S1 | LFP volume, NMC_high premium, LMFP growing, nothing new ever arrives | ~10% to hold unchanged to 2070; kept as the no-surprises reference |
+| S2 | sodium enters small segments, **NMC shrinks to a niche** rather than disappearing | ~55% |
+| S3 | S2 plus bipolar solid-state **from 2040**, large segments first | ~40% that solid-state is material by 2050; ~15% at this pace |
+
+S2 was deliberately reframed from "NMC eliminated by 2035" — the least
+defensible clause proposed, since Korean and European cell capacity is committed
+to NMC and long-range premium demand does not vanish. Shrinking it to a few per
+cent keeps the copper story, which is the point, without resting on a clause
+likely to be wrong. LMFP was added to all three: it is **already in the
+workbook** at 172 Wh/kg pack with no Ni or Co, so it fills the "LFP but denser"
+role with no new assumptions.
+
+The China assumption is built into the anchors, not modelled separately:
+Chinese-built BEVs approaching half the EU market within a decade is what
+carries LFP and then sodium into the mainstream this fast. If that stalls, every
+LFP and Na trajectory here is too fast.
+
+**⚠️ The coverage line is the most important thing on the sales figure.** The
+stack is ordered so chemistries WITH a workbook composition sit at the bottom;
+the black line is therefore the share whose material content can be computed at
+all. It falls to 20–36% by 2070 under S3. Sodium-ion and bipolar solid-state
+have no composition and are not variants of anything that does — sodium swaps
+the copper anode collector for aluminium (~0.4 kg Cu/kWh, 55–59% of the pack's
+copper), bipolar solid-state deletes the separator, the electrolyte and the
+per-cell terminals. Those entries have to be supplied before any scenario
+produces material mass.
+
+### Second life, and the outflow lag
+
+`06`-style outputs do not exist; the returning mix is the second figure from
+`05`. A return year draws on two sales years at once:
+
+    straight from the car   sold in Y − 15
+    via second life         sold in Y − 15 − (15 to 20)
+
+with `second_life.second_life_share` deciding how much of each chemistry is
+diverted — **not all of it**: LFP 35%, LMFP 30%, Na 25%, NMC 10%, NCA 5%. That
+parameter is a genuine unknown and the one most worth varying.
+
+The consequence is the point: **in 2045 the large segments return 57% NMC_high
+under S2 while only 17% is being sold.** The scenarios barely separate on
+recovered material before about 2045, because everything coming back before then
+is already on the road. An LFP-heavy scenario is also the one whose material
+comes back latest.
+
+⚠️ The returning mix assumes **constant annual sales volume** — only shares
+exist in this project. Real volumes come from the stock-and-flow model, and
+growth means the true return mix is somewhat more modern than shown.
+
 ## 6. Open questions, and who they are for
 
 1. ~~Which kWh does the workbook mean?~~ **ANSWERED 2026-09-08: nominal.** The

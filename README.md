@@ -26,6 +26,7 @@ It is the battery counterpart to `RAWCLICVehicleComposition` (whole car) and
 | `02_composition_by_capacity.py` | The composition at **any** capacity, with a Monte Carlo band. Prints a table and writes two figures. |
 | `03_capacity_by_segment_over_time.py` | Battery capacity by segment and year from `EV_details.csv`, smoothed, with the market spread and a bootstrap band. One figure per capacity basis. |
 | `04_capacity_by_chemistry.py` | The same, split by cathode chemistry — LFP, NCA, NMC_middle, NMC_high — where at least 5 distinct models carry it. Prints the table too. |
+| `05_chemistry_scenarios.py` | Three chemistry scenarios to 2070, and the mix arriving for recycling once vehicle life and second life are applied. **Assumption, not data.** |
 
 `02` takes arguments:
 
