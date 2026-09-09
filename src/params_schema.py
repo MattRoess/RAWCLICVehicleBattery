@@ -881,31 +881,102 @@ class ExportParams:
         "Na_ion": {
             "based_on": "battLiFP_subsub",
             "remove_components": (),
-            "element_swaps": {"currentCollectorAnode": {"Cu": "Al"}},
+            "element_swaps": {"currentCollectorAnode": {"Cu": "Al"},
+                              "batteryPackCellTerminals": {"Cu": "Al"}},
             # The pack hardware is chemistry-independent, and the current
             # collectors are the whole point of the sodium case. The cathode,
             # anode and electrolyte are not claimed.
             "assert_elements_for": ("currentCollectorAnode", "currentCollectorCathode",
+                                    "batteryCellCasing", "batteryCellSeparator",
+                                    "batteryPackCellTerminals",
                                     "batteryPackCables", "batteryPackSupportFrame",
                                     "batteryPackThermalConductor",
                                     "batteryPackModuleEnclosuresAndCoolantManifolds"),
-            "note": ("structure assumed from LFP; Al replaces Cu as the anode current "
-                     "collector; cathode, anode and electrolyte elements are NOT known"),
+            # The packaging is what can be claimed. Everything here keeps the base
+            # chemistry's mass; the cathode, anode and electrolyte stay empty. At
+            # 75 kWh that fills 46.7% of the pack and leaves 53.3% open.
+            "claim_masses_for": ("currentCollectorAnode", "currentCollectorCathode",
+                                 "batteryCellCasing", "batteryCellSeparator",
+                                 "batteryPackCellTerminals",
+                                 "batteryPackCables", "batteryPackSupportFrame",
+                                 "batteryPackThermalConductor",
+                                 "batteryPackModuleEnclosuresAndCoolantManifolds"),
+            # Relabelling copper foil as aluminium without changing its mass would
+            # be wrong twice over. Aluminium is 2.70 g/cm3 against copper's 8.96,
+            # but it also conducts at only 37.7 MS/m against 59.6, so matching the
+            # resistance needs 1.58x the cross-section. Both together:
+            #     (59.6 / 37.7) x (2.70 / 8.96) = 0.4764
+            # LFP's 27.56 kg of copper becomes 13.13 kg of aluminium -- a 14.43 kg
+            # saving, only 2.9% of a 495 kg pack. The mass is not the point. The
+            # copper is: that collector is 27.56 of the 45.07 kg of copper in the
+            # whole pack, 61%, so a sodium pack carries 17.50 kg -- cables and
+            # terminals only.
+            # ASSUMPTION, NOT MEASUREMENT: equal conductance. A real cell trades
+            # resistance against mass differently, and a move to 800V lowers the
+            # current, which relaxes this and pushes the mass back toward the
+            # 8.31 kg that pure density scaling would give.
+            #
+            # Keyed by component AND element, and applied while the row still says
+            # copper: the terminals are part aluminium already, and that aluminium
+            # must not be scaled by a copper-to-aluminium factor.
+            "mass_scale": {"currentCollectorAnode": {"Cu": 0.4764},
+                           "batteryPackCellTerminals": {"Cu": 0.4764}},
+            # Sodium has no density trajectory, so there is no second pack density
+            # to scale the structure against, and none is invented.
+            "scale_structure_with_density": False,
+            "note": ("packaging assumed from LFP -- casing, separator, terminals, "
+                     "collectors and pack hardware carry LFP's masses; Al replaces Cu "
+                     "as the anode current collector, its mass scaled by 0.4764 for "
+                     "equal conductance (density AND conductivity, an assumption); "
+                     "cathode, anode and electrolyte are NOT known"),
         },
         "solid_state": {
             "based_on": "battLiNMC_highNi",
+            # BIPOLAR MEANS ONE PACKAGE FOR THE WHOLE BATTERY, NOT ONE PER CELL.
+            # The cells are stacked directly against each other, so there is no
+            # per-cell can and no module enclosure -- only the outer pack. That
+            # removes 5.12 kg of cell casing and 33.10 kg of module enclosures and
+            # coolant manifolds at 75 kWh, on top of the separator, the liquid
+            # electrolyte and the per-cell terminals a bipolar stack also does
+            # without.
             "remove_components": ("batteryCellSeparator", "batteryCellElectrolyte",
-                                  "batteryPackCellTerminals"),
+                                  "batteryPackCellTerminals", "batteryCellCasing",
+                                  "batteryPackModuleEnclosuresAndCoolantManifolds"),
             "element_swaps": {},
-            # Only the pack hardware. The current collectors are left unclaimed
-            # too: a lithium-metal anode normally keeps its copper substrate, a
-            # sodium one would not, and that choice is open.
-            "assert_elements_for": ("batteryPackCables", "batteryPackSupportFrame",
+            # The collectors ARE claimed, at NMC_highNi's aluminium cathode side and
+            # COPPER anode side, because the copper is the number that is wanted: if
+            # a solid-state cell keeps its copper substrate that is 21.46 kg per car
+            # of a critical raw material, and a model that leaves it blank cannot say
+            # so either way. It is a claim about an undecided design -- a
+            # lithium-metal anode normally keeps the copper, a sodium-metal one would
+            # not -- so it is stated here rather than buried.
+            "assert_elements_for": ("currentCollectorAnode", "currentCollectorCathode",
+                                    "batteryCellCasing",
+                                    "batteryPackCables", "batteryPackSupportFrame",
                                     "batteryPackThermalConductor",
                                     "batteryPackModuleEnclosuresAndCoolantManifolds"),
+            # Packaging only. At 75 kWh this fills 57.5% of the pack -- higher than
+            # sodium's 46.7%, because bipolar construction has already removed the
+            # separator, the electrolyte and the per-cell terminals.
+            "claim_masses_for": ("currentCollectorAnode", "currentCollectorCathode",
+                                 "batteryPackCables", "batteryPackSupportFrame",
+                                 "batteryPackThermalConductor"),
+            # HALVED, because a bipolar plate is shared. In a stacked cell the same
+            # sheet is the cathode collector of one cell and the anode collector of
+            # the next, so the count is roughly halved rather than carried over
+            # one-for-one from a monopolar NMC pack.
+            "mass_scale": {"currentCollectorAnode": {"Cu": 0.5},
+                           "currentCollectorCathode": {"Al": 0.5}},
+            # See 06_generate_composition_files.py: the frame, the thermal
+            # conductor, the cables and the collectors are scaled by the base
+            # chemistry's pack density over solid-state's, because a structure
+            # sized for 190 Wh/kg is far too heavy around a 510 Wh/kg stack.
+            "scale_structure_with_density": True,
             "note": ("bipolar: no separator, no liquid electrolyte, no per-cell "
-                     "terminals; anode is Li or Na metal, not graphite -- which one "
-                     "is undecided, so anode, cathode and collector elements are NOT known"),
+                     "terminals; packaging assumed from NMC_highNi, INCLUDING a copper "
+                     "anode current collector -- a solid-state cell may not need one, "
+                     "so treat that 21.46 kg of copper as an upper bound; anode is Li "
+                     "or Na metal, not graphite, so anode and cathode are NOT known"),
         },
     })
 
@@ -1502,7 +1573,9 @@ class Params:
                     "now has a real composition, delete the template rather than "
                     "leaving a skeleton that will quietly override it.")
             missing_keys = sorted({"based_on", "remove_components", "element_swaps",
-                                   "assert_elements_for", "note"} - set(template))
+                                   "assert_elements_for", "claim_masses_for",
+                                   "mass_scale", "scale_structure_with_density",
+                                   "note"} - set(template))
             if missing_keys:
                 raise ParameterError(
                     f"export.unknown_chemistry_template[{chemistry!r}] is missing "

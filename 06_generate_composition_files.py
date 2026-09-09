@@ -67,6 +67,12 @@ from src.params_schema import ParameterError, current  # noqa: E402
 
 LAST_OBSERVED_YEAR = 2026
 
+# What the cathode, anode and electrolyte of an unknown chemistry are called.
+# A named material, not a blank: a reader scanning the element column sees that
+# something belongs there and is not yet known, which an empty cell does not say.
+# The consolidated workbook uses 'undefinedElements' for the same idea.
+UNKNOWN_MATERIAL = "unknownBatteryMaterial"
+
 
 def segment_capacities(params, ev: EVDetails, segments: list[str]) -> pd.DataFrame:
     """Nominal capacity per segment per export year, marked observed or projected."""
@@ -311,7 +317,33 @@ def build_unknown_rows(model: CompositionModel, params, capacities: pd.DataFrame
     swaps = dict(template["element_swaps"])
 
     rows = build_rows(model, params, capacities, base)
+
+    # The base chemistry's OWN pack density, per segment-year, taken before any
+    # removal so it describes the whole pack the borrowed structure was built
+    # for. This is what `scale_structure_with_density` divides into.
+    base_density = None
+    if template["scale_structure_with_density"]:
+        whole = rows[rows.level == rows.level.iloc[0]]
+        base_mass = (whole.groupby(["segment", "year"], dropna=False)["mass_kg"]
+                     .sum())
+        base_capacity = pd.MultiIndex.from_frame(
+            base_mass.index.to_frame()).map(real_capacities)
+        base_density = (pd.Series(base_capacity.to_numpy(), index=base_mass.index)
+                        * 1000.0 / base_mass)
+
     rows = rows[~rows.component.isin(removed)].copy()
+
+    # Scale BEFORE the swap, while the row still says which metal it was: the
+    # factor is a property of the substitution (copper -> aluminium), so it has
+    # to land on the copper rows and not on aluminium that was already there.
+    mass_columns = [c for c in rows.columns
+                    if c.startswith("mass_") or c == "kg_per_kwh"]
+    for component, by_element in template["mass_scale"].items():
+        for element, factor in by_element.items():
+            target = (rows.component == component) & (rows.element == element)
+            for column in mass_columns:
+                rows.loc[target, column] = pd.to_numeric(
+                    rows.loc[target, column], errors="coerce") * factor
 
     for component, mapping in swaps.items():
         # Scoped to one component. A blanket swap would recolour every copper in
@@ -326,26 +358,97 @@ def build_unknown_rows(model: CompositionModel, params, capacities: pd.DataFrame
     # nobody made, empty mass or not.
     asserted = set(template["assert_elements_for"])
     unclaimed = rows.element.notna() & ~rows.component.isin(asserted)
-    rows.loc[unclaimed, "element"] = "unknown"
+    rows.loc[unclaimed, "element"] = UNKNOWN_MATERIAL
 
-    # A swap can collapse two element rows into one (LFP's Al and Cu terminals
-    # both become Al). With no masses to add up, the duplicate is just noise.
-    rows = rows.drop_duplicates(
-        subset=["segment", "year", "level", "component", "element"]).copy()
+    # A swap can collapse two element rows into one -- LFP's terminals are part
+    # aluminium and part copper, and for sodium both become aluminium. These now
+    # carry masses, so the duplicates are SUMMED. Dropping one, which is what
+    # this did while every mass was empty, would silently lose the copper's
+    # share: 2.46 kg of aluminium plus 5.38 kg of copper is 5.02 kg of aluminium
+    # after scaling, not 2.46.
+    group = ["segment", "year", "level", "component", "element"]
+    summable = [c for c in mass_columns if c in rows.columns]
+    if rows.duplicated(subset=group).any():
+        aggregation = {c: "sum" for c in summable}
+        aggregation.update({c: "first" for c in rows.columns
+                            if c not in summable and c not in group})
+        rows = rows.groupby(group, as_index=False, dropna=False).agg(aggregation)
 
     rows["chemistry"] = chemistry
     rows["layer1"] = chemistry
-    rows["composition_status"] = "unknown"
     rows["note"] = template["note"]
 
-    # Wipe every number. Capacity and structure survive; nothing quantitative does.
-    for column in [c for c in rows.columns
-                   if c.startswith("mass_") or c == "kg_per_kwh"]:
-        rows[column] = pd.NA
+    # The packaging is claimable and the active materials are not, so the two are
+    # marked apart rather than the whole file being called one thing. A reader
+    # filtering on composition_status gets the claim, not the chemistry's name.
+    claimed = set(template["claim_masses_for"])
+    is_claimed = rows.component.isin(claimed)
+    rows["composition_status"] = np.where(is_claimed, "packaging_from_base", "unknown")
+
+    # THE STRUCTURE SCALES WITH THE BATTERY IT CARRIES, NOT WITH ITS kWh. This is
+    # the correction that makes the arithmetic close. A support frame sized for a
+    # 190 Wh/kg pack is far too heavy for a 510 Wh/kg one holding the same energy:
+    # the solid-state stack is physically smaller, so the frame around it is
+    # lighter. Carried over unscaled, the frame alone (87 kg) exceeded the whole
+    # implied mass of a 45 kWh 2060 pack (88 kg), and 16 of 20 segment-years came
+    # out negative. Scaled, none do, and the unknown active material lands at
+    # 48-61% of pack mass -- against roughly 42% in today's NMC, which is the
+    # right direction for a chemistry that has shed this much inert structure.
+    if base_density is not None:
+        year_density = rows.year.map(
+            lambda y: pack_density(params, chemistry, float(y)))
+        factor = (pd.MultiIndex.from_frame(rows[["segment", "year"]])
+                  .map(base_density).to_numpy() / year_density.to_numpy())
+        for column in mass_columns:
+            rows.loc[is_claimed, column] = (
+                pd.to_numeric(rows.loc[is_claimed, column], errors="coerce")
+                * factor[is_claimed.to_numpy()])
+
+    # Wipe the numbers we are NOT claiming. The cathode, the anode and the
+    # electrolyte keep nothing: an empty cell is a reader's cue to go and find
+    # the number, where a plausible one borrowed from a lithium chemistry is a
+    # claim nobody made.
+    for column in mass_columns:
+        rows.loc[~is_claimed, column] = pd.NA
 
     # Put the real capacity back, whatever the base chemistry could answer for.
     rows["capacity_kwh_nominal"] = pd.MultiIndex.from_frame(
         rows[["segment", "year"]]).map(real_capacities)
+
+    # THE REMAINDER. Where the whole pack's mass is known -- a chemistry with a
+    # density trajectory -- what is left after the packaging is the active
+    # material, even though its split between cathode and anode is not known.
+    # One row carries it, rather than the cathode and anode rows each carrying a
+    # guess. Sodium has no density trajectory, so it gets no remainder and its
+    # unknown rows stay empty; that is the honest difference between the two.
+    if implied is not None:
+        claimed_mass = (rows.loc[is_claimed]
+                        .groupby(["segment", "year", "level"], dropna=False)["mass_kg"]
+                        .sum())
+        index = pd.MultiIndex.from_frame(
+            claimed_mass.index.to_frame()[["segment", "year"]])
+        remainder = pd.Series(index.map(implied).to_numpy(),
+                              index=claimed_mass.index) - claimed_mass
+        if (remainder < 0).any():
+            worst = remainder.min()
+            raise CompositionError(
+                f"{chemistry}: the packaging alone weighs more than the pack mass "
+                f"implied by its density trajectory, by up to {-worst:.1f} kg. Either "
+                "the trajectory is too optimistic or the borrowed packaging is too "
+                "heavy -- both are assumptions, and one of them has to give.")
+        extra = claimed_mass.index.to_frame(index=False)
+        extra["component"] = UNKNOWN_MATERIAL
+        extra["element"] = UNKNOWN_MATERIAL
+        extra["mass_kg"] = remainder.to_numpy()
+        extra["branch"] = "cell"
+        extra["chemistry"] = chemistry
+        extra["layer1"] = chemistry
+        extra["composition_status"] = "unknown_remainder"
+        extra["note"] = (template["note"] +
+                         "; this row is the whole pack mass minus the packaging -- "
+                         "the active material in total, not split between cathode "
+                         "and anode")
+        rows = pd.concat([rows, extra], ignore_index=True)
 
     if implied is not None:
         # The WHOLE PACK's mass follows from the assumed energy density and the
