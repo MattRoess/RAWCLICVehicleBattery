@@ -157,7 +157,8 @@ def build_rows(model: CompositionModel, params, capacities: pd.DataFrame,
             "capacity_kwh_nominal", "capacity_is_projected", "capacity_source",
             "mass_kg", "kg_per_kwh", "extrapolated"]
     if export.include_uncertainty:
-        keep += [c for c in rows.columns if c.startswith("mass_p") or c == "mass_mean"]
+        keep += [c for c in rows.columns
+                 if (c.startswith("mass_") and c != "mass_kg") or c == "mass_mean"]
     rows["chemistry"] = chemistry
     rows["composition_status"] = "from_workbook"
     rows["note"] = ""

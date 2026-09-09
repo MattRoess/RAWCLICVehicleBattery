@@ -279,10 +279,16 @@ class MonteCarloParams:
     # SAFE TO CHANGE: yes.
     enabled: bool = True
 
-    # How many draws. The bands settle by a few thousand; more only smooths the
-    # tails of a distribution whose width is a flat rule to begin with (below).
-    # SAFE TO CHANGE: yes. 2,000 is a working figure, 20,000 for anything shown.
-    n_draws: int = 20_000
+    # How many draws. The BANDS settle by a few thousand -- measured, the mean and
+    # the 2.5/97.5 percentiles move only about 0.1% between 20,000 and 200,000.
+    # The MODE does not: it is a histogram peak, and it tightens from 1.57% worst
+    # case at 20,000 draws to 0.44% at 200,000 (checked against the triangular's
+    # known mode of 1.0). That, and matching RAWCLICVehicleElectronics' own
+    # N_SIMULATIONS = 200,000, is why this is 200,000.
+    # Costs about 30 minutes for a full 06 run, and 318 MB per draw array.
+    # SAFE TO CHANGE: yes. 2,000 is a working figure while editing, 20,000 for a
+    # figure, 200,000 for the composition files that leave this project.
+    n_draws: int = 200_000
 
     # Fixed seed, so the same settings give the same bands and two runs can be
     # compared. Set to None for a different sample every run.
