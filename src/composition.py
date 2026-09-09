@@ -114,6 +114,17 @@ def approximate_mode(draws: np.ndarray, bins: int = 200) -> np.ndarray:
     """
     out = np.empty(draws.shape[0])
     for i, row in enumerate(draws):
+        low, high = row.min(), row.max()
+        if not (high > low):
+            # Every draw identical -- a zero-width band, or a mass that is zero
+            # because the chemistry does not contain that element at all. Left to
+            # the histogram this returns 0.0025 kg rather than 0: numpy spreads an
+            # all-zero sample over a default range of (-0.5, 0.5), and the midpoint
+            # of the tallest bin is not the value itself. It affected 5,016 of
+            # 39,204 rows before this guard -- 12.8%, every one of them a phantom
+            # 2.5 g of an element that is not there.
+            out[i] = low
+            continue
         counts, edges = np.histogram(row, bins=bins)
         j = int(np.argmax(counts))
         out[i] = 0.5 * (edges[j] + edges[j + 1])
@@ -341,6 +352,42 @@ class CompositionModel:
         return central[:, None] * self.factor_draws()
 
     # ------------------------------------------------------------ public API
+    def element_draws_at(self, capacity_kwh: float, *, chemistry: str
+                         ) -> tuple[list[str], np.ndarray]:
+        """
+        Every Monte Carlo draw of element mass, rather than a summary of them.
+
+        Returns (elements, masses) where masses is (n_elements, n_draws) in kg,
+        summed across components exactly as `weights_at(..., level='element',
+        aggregate_elements=True)` does -- it shares this method's selection and
+        grouping so the two cannot drift apart.
+
+        WHY THIS EXISTS. RAWCLICStockAndFlow multiplies element data against its
+        own per-draw vehicle counts, one draw against one draw. It cannot do that
+        from a percentile: the 97.5th percentile of a product is not the product
+        of the 97.5th percentiles. The same reasoning, and the same file layout,
+        as RAWCLICVehicleElectronics' persisted element fractions.
+        """
+        keys, scope = self._series.keys, self.params.scope
+        known = set(keys["chemistry"]) - {scope.pack_level_key}
+        if chemistry not in known:
+            raise CompositionError(
+                f"unknown chemistry {chemistry!r}. The workbook has: {sorted(known)}")
+
+        wanted = ((keys["code"] == scope.element_parameter_code)
+                  & keys["chemistry"].isin([chemistry, scope.pack_level_key]))
+        if not wanted.any():
+            raise CompositionError(
+                f"no element rows for chemistry {chemistry!r}.")
+
+        draws = self.mass_draws_at(float(capacity_kwh))[wanted.to_numpy()]
+        subset = keys[wanted].reset_index(drop=True)
+        elements, rows = [], []
+        for element, positions in subset.groupby("element").indices.items():
+            elements.append(str(element))
+            rows.append(draws[positions].sum(axis=0))
+        return elements, np.vstack(rows)
+
     def weights_at(self, capacity_kwh: float, *, chemistry: str,
                    level: str = "component", aggregate_elements: bool = False) -> pd.DataFrame:
         """

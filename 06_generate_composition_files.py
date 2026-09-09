@@ -452,6 +452,48 @@ def main(argv: list[str] | None = None) -> int:
         flag = "  << UNKNOWN, masses empty" if unknown else ""
         print(f"  {path.name:<44} {len(rows):>7,} rows{flag}")
 
+    # -----------------------------------------------------------------------
+    # Per-draw element FRACTIONS, at the workbook's own capacity anchors.
+    #
+    # WHY FRACTIONS AND WHY PER DRAW. RAWCLICStockAndFlow multiplies element data
+    # against its own per-draw vehicle counts, draw against draw, which no
+    # percentile can support. Same reasoning and same layout as
+    # RAWCLICVehicleElectronics' `Composition/element_draws/`.
+    #
+    # WHY THE ANCHORS, AND NOT ONE ARRAY. Unlike the electronics model -- whose
+    # composition is frozen at 2025 and genuinely has no second axis -- these
+    # fractions move with capacity, because the pack hardware (frame, thermal
+    # conductor, cables: Fe, Al, Cu) does not scale with kWh while the cell
+    # materials do. Measured across 25 -> 100 kWh they shift by 21% to 60%
+    # relative, so a single array per chemistry would be wrong by up to 60%.
+    #
+    # THE CONSUMER MUST INTERPOLATE, AND WILL SOMETIMES EXTRAPOLATE: the fitted
+    # capacities land between anchors (JC 76.3) and above the top one (JE 104.5,
+    # F 106.1). Measured on battLiNMC_midNi against the model's own fractions,
+    # linear interpolation is within 0.51% and linear extrapolation from the top
+    # two anchors within 0.41% -- well inside the 2.5-97.5 band. Checked on that
+    # one chemistry and no higher than 106 kWh.
+    # -----------------------------------------------------------------------
+    draws_dir = params.composition_output_path(PROJECT_ROOT, "element_draws")
+    draws_dir.mkdir(parents=True, exist_ok=True)
+    anchors = [float(c) for c in model._series.capacities]
+    n_written = 0
+    for chemistry in chemistries:
+        for anchor in anchors:
+            elements, masses = model.element_draws_at(anchor, chemistry=chemistry)
+            totals = masses.sum(axis=0)
+            fractions = np.zeros_like(masses)
+            live = totals > 0
+            fractions[:, live] = masses[:, live] / totals[live]
+            stem = f"batt_{chemistry}_{int(anchor)}kWh"
+            # (draws, elements) float32, the orientation the electronics files use.
+            np.save(draws_dir / f"{stem}_fractions.npy", fractions.T.astype(np.float32))
+            (draws_dir / f"{stem}_elements.txt").write_text("\n".join(elements))
+            n_written += 1
+    print(f"\nWrote {n_written} per-draw fraction arrays to "
+          f"{params.export.composition_output_dir}/element_draws/ "
+          f"({len(anchors)} anchors x {len(chemistries)} chemistries)")
+
     index = capacities.pivot_table(index="segment", columns="year",
                                    values="capacity_kwh_nominal")
     index_path = params.composition_output_path(PROJECT_ROOT,

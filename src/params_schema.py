@@ -285,7 +285,9 @@ class MonteCarloParams:
     # case at 20,000 draws to 0.44% at 200,000 (checked against the triangular's
     # known mode of 1.0). That, and matching RAWCLICVehicleElectronics' own
     # N_SIMULATIONS = 200,000, is why this is 200,000.
-    # Costs about 30 minutes for a full 06 run, and 318 MB per draw array.
+    # Costs 5 min 15 s for a full 06 run -- timed, not estimated -- and 318 MB per
+    # draw array. The draws are sampled once per model and reused, so the cost is
+    # far below draws x capacities.
     # SAFE TO CHANGE: yes. 2,000 is a working figure while editing, 20,000 for a
     # figure, 200,000 for the composition files that leave this project.
     n_draws: int = 200_000
