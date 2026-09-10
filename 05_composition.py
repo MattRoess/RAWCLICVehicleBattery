@@ -68,6 +68,28 @@ LAST_OBSERVED_YEAR = 2026
 UNKNOWN_MATERIAL = "unknownBatteryMaterial"
 
 
+def capacity_growth_factor(params, segment: str, year: float, base_year: float) -> float:
+    """
+    Multiplier on a PROJECTED capacity under the grow_* scenarios.
+
+    The chemistry cost saving (NMC -> LFP -> sodium) can be taken as a cheaper
+    car or as a bigger battery. Through 2026 it went to price: at equal capacity
+    and segment an LFP car is 17.7% cheaper, and at equal price it carries only
+    2.0% +/- 1.8 pp more kWh. The grow_* scenarios assume part of it turns into
+    capacity instead, and only where price competition is the binding
+    constraint -- A-D, not E/F. Compounded per decade, from the segment's last
+    fitted year.
+    """
+    export = params.export
+    if export.capacity_scenario == "saturate":
+        return 1.0
+    if segment not in export.capacity_growth_segments:
+        return 1.0
+    rate = export.capacity_growth_per_decade[export.capacity_scenario]
+    decades = max(0.0, (float(year) - float(base_year)) / 10.0)
+    return float((1.0 + rate) ** decades)
+
+
 def segment_capacities(params, ev: EVDetails, segments: list[str]) -> pd.DataFrame:
     """Nominal capacity per segment per export year, marked observed or projected."""
     export = params.export
@@ -101,8 +123,12 @@ def segment_capacities(params, ev: EVDetails, segments: list[str]) -> pd.DataFra
                 print(f"[export] segment {segment}: no usable models; using "
                       f"battery_size_map, {value:g} kWh.")
             for year in years:
+                # No fit, so there is no segment-specific last observed year:
+                # grow from the year the database itself ends.
+                grown = value * capacity_growth_factor(params, segment, year,
+                                                       LAST_OBSERVED_YEAR)
                 rows.append({"segment": segment, "year": year,
-                             "capacity_kwh_nominal": round(float(value), 2),
+                             "capacity_kwh_nominal": round(float(grown), 2),
                              "capacity_is_projected": True,
                              "capacity_source": source})
             continue
@@ -124,6 +150,7 @@ def segment_capacities(params, ev: EVDetails, segments: list[str]) -> pd.DataFra
             else:
                 capacity = (last_value if export.capacity_projection == "hold"
                             else last_value + gradient * (year - last_year))
+                capacity *= capacity_growth_factor(params, segment, year, last_year)
                 projected = True
             capacity = float(np.clip(capacity, params.interpolation.min_capacity_kwh,
                                      export.max_projected_capacity_kwh))
@@ -760,6 +787,16 @@ def main(argv: list[str] | None = None) -> int:
     print(f"Segments    : {sorted(capacities.segment.unique())}")
     print(f"Capacity    : fitted to {LAST_OBSERVED_YEAR}, then "
           f"'{export.capacity_projection}', capped at {export.max_projected_capacity_kwh:g} kWh")
+    if export.capacity_scenario == "saturate":
+        print("              scenario 'saturate': the chemistry cost saving goes to "
+              "price, not capacity -- which is what 2019-2026 shows.")
+    else:
+        rate = export.capacity_growth_per_decade[export.capacity_scenario]
+        print(f"              scenario '{export.capacity_scenario}': ASSUMED "
+              f"+{rate:.0%} per decade on projected years in "
+              f"{list(export.capacity_growth_segments)}; every other segment flat. "
+              "Nothing measured supports this -- it is the counter-assumption to "
+              "'saturate'.")
     print(f"Chemistries : {len(chemistries)} with composition -- {chemistries}")
     if export.write_unknown_chemistries:
         print(f"              {len(missing)} marked unknown -- {missing}: row skeleton "
@@ -792,6 +829,13 @@ def main(argv: list[str] | None = None) -> int:
             trajectory = ", ".join(
                 f"{year}: {pack_density(params, chemistry, year):.0f}"
                 for year in entry["years"])
+            if export.capacity_scenario != "saturate":
+                # The growth scenario never reaches this chemistry: its capacity
+                # comes from the range target, not from the segment history the
+                # scenario scales. Saying so beats a reader assuming otherwise.
+                print(f"  {chemistry}: NOT affected by capacity_scenario "
+                      f"'{export.capacity_scenario}' -- a range-target capacity "
+                      "ignores the segment trend entirely.")
             print(f"\n  {chemistry}: capacity from a "
                   f"{params.technology.range_saturation_km:g} km range target; "
                   f"density {entry['basis']} basis"

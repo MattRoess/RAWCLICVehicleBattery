@@ -733,6 +733,41 @@ class ExportParams:
     # SAFE TO CHANGE: yes -- 'trend' is there to bound the other side.
     capacity_projection: str = "hold"
 
+    # ⚠️ WHERE THE CHEMISTRY COST SAVING GOES. NMC -> LFP -> sodium each cut the
+    # pack cost, and that saving can be taken as a cheaper car or as a bigger
+    # battery. This is the switch, and it is an ASSUMPTION about buyer and maker
+    # behaviour, not a fitted trend.
+    #   'saturate'  all of it goes to price; capacity follows capacity_projection
+    #   'grow_low'  part of it goes to capacity, +5% per decade in A-D
+    #   'grow_high' more of it goes to capacity, +10% per decade in A-D
+    # 'saturate' is the default because it is what the record shows. Across 717
+    # A-D models with a German list price, an LFP car at the SAME capacity and
+    # segment is 17.7% +/- 1.4 pp cheaper, while at the same PRICE and segment it
+    # carries just 2.0% +/- 1.8 pp more kWh -- statistically nothing. Through
+    # 2026 the saving went essentially all to price and none to capacity. The
+    # grow_* scenarios assume that split changes; nothing measured says it will.
+    # SAFE TO CHANGE: yes -- that is the point of the switch.
+    capacity_scenario: str = "saturate"
+
+    # Growth per decade under each grow_* scenario, applied to the PROJECTED
+    # years only (after each segment's last fitted year), compounding.
+    # SAFE TO CHANGE: yes.
+    capacity_growth_per_decade: dict[str, float] = field(default_factory=lambda: {
+        "grow_low": 0.05,
+        "grow_high": 0.10,
+    })
+
+    # ⚠️ ONLY THESE SEGMENTS GROW. A-D and their J counterparts are the
+    # price-competitive end, where a cheaper chemistry can plausibly be spent on
+    # capacity. E, F, JE and JF are left flat: they are not price-constrained
+    # (segment F runs at 1256 EUR/kWh against 625-790 in A-C), they stay on
+    # NMC/NCA in every scenario, and their median capacity has been flat at
+    # ~91 kWh since 2022. Growing them too would be an assumption with the
+    # measured evidence against it.
+    # SAFE TO CHANGE: yes.
+    capacity_growth_segments: tuple[str, ...] = (
+        "A", "B", "C", "D", "JA", "JB", "JC", "JD")
+
     # Cap on the projected capacity, kWh, whatever the projection or a range
     # target says. A trend continued to 2070 has to stop somewhere, and an
     # unbounded one silently leaves the range the composition model will answer
@@ -1614,6 +1649,24 @@ class Params:
             raise ParameterError(
                 f"export.capacity_projection must be 'hold' or 'trend': "
                 f"{ex.capacity_projection!r}")
+        grow_names = tuple(ex.capacity_growth_per_decade)
+        if ex.capacity_scenario not in ("saturate",) + grow_names:
+            raise ParameterError(
+                "export.capacity_scenario must be 'saturate' or one of "
+                f"{grow_names}: {ex.capacity_scenario!r}")
+        for name, rate in ex.capacity_growth_per_decade.items():
+            if not name.startswith("grow"):
+                raise ParameterError(
+                    "export.capacity_growth_per_decade keys must start with 'grow' "
+                    f"so no scenario can be confused with 'saturate': {name!r}")
+            if not 0.0 <= float(rate) < 1.0:
+                raise ParameterError(
+                    f"export.capacity_growth_per_decade[{name!r}] must be in [0, 1): "
+                    f"{rate!r}")
+        if ex.capacity_scenario != "saturate" and not ex.capacity_growth_segments:
+            raise ParameterError(
+                f"export.capacity_scenario is {ex.capacity_scenario!r} but "
+                "export.capacity_growth_segments is empty -- nothing would grow.")
         if ex.max_projected_capacity_kwh > self.interpolation.max_capacity_kwh:
             raise ParameterError(
                 f"export.max_projected_capacity_kwh ({ex.max_projected_capacity_kwh}) "
