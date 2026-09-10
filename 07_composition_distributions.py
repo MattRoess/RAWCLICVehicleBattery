@@ -1,12 +1,12 @@
 """
-08_composition_distributions.py
+07_composition_distributions.py
 ===============================
 
 How much of a material a battery holds, and how sure we are -- compared across
 chemistries, which is the comparison that carries information.
 
     ./.venv/bin/python 00_parameters.py                    # first, always
-    ./.venv/bin/python 08_composition_distributions.py
+    ./.venv/bin/python 07_composition_distributions.py
 
 ONE FULL-SIZE FIGURE PER MATERIAL, plus one for the whole pack. Each shows every
 chemistry's distribution of that quantity, overlaid, in absolute kg on a linear

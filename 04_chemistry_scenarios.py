@@ -1,11 +1,11 @@
 """
-05_chemistry_scenarios.py
+04_chemistry_scenarios.py
 =========================
 
 The three cathode-chemistry scenarios to 2070.
 
     ./.venv/bin/python 00_parameters.py         # first, always
-    ./.venv/bin/python 05_chemistry_scenarios.py
+    ./.venv/bin/python 04_chemistry_scenarios.py
 
 Writes `chemistry_scenarios_to_2070.png` to paths.output_dir and prints the mix
 at each anchor year, plus how much of each scenario can be costed in materials

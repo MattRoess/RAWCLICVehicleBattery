@@ -1,5 +1,5 @@
 """
-00_check_environment.py
+99_check_environment.py
 =======================
 
 Smoke test for a fresh checkout: proves the interpreter, the packages and the

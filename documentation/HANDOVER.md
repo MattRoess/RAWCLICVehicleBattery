@@ -88,23 +88,22 @@ Repository: <https://github.com/MattRoess/RAWCLICVehicleBattery>. Branch
 it, `git log --oneline main..HEAD` — a count written here goes stale the next
 time anyone commits, as it already did once.
 
-All ten scripts run. `06` takes **5 min 15 s** at 200,000 draws — timed.
+All nine scripts run. `03` takes **5 min 15 s** at 200,000 draws — timed.
 
 ```bash
 ./.venv/bin/python 00_parameters.py                 # always first
 ./.venv/bin/python 99_check_environment.py
 ./.venv/bin/python 01_draw_battery_structure.py
 ./.venv/bin/python 02_composition_by_capacity.py
-./.venv/bin/python 03_capacity_by_segment_over_time.py
-./.venv/bin/python 04_capacity_by_chemistry.py
-./.venv/bin/python 05_chemistry_scenarios.py
-./.venv/bin/python 06_generate_composition_files.py # segment-year files
-./.venv/bin/python 07_composition_over_time.py     # figures, one per element
-./.venv/bin/python 08_composition_distributions.py # figures, one per chemistry
-./.venv/bin/python 09_consolidated_composition.py  # THE DELIVERABLE
+./.venv/bin/python 03_capacity_by_chemistry.py
+./.venv/bin/python 04_chemistry_scenarios.py
+./.venv/bin/python 05_generate_composition_files.py # segment-year files
+./.venv/bin/python 06_composition_over_time.py     # figures, one per element
+./.venv/bin/python 07_composition_distributions.py # figures, one per chemistry
+./.venv/bin/python 08_consolidated_composition.py  # THE DELIVERABLE
 ```
 
-**`09` is the one to hand on.** It writes `data/consolidated/`, one file per
+**`03` is the one to hand on.** It writes `data/consolidated/`, one file per
 chemistry in the INPUT WORKBOOK'S OWN SCHEMA, expanded — which is what the rest
 of RAWCLIC expects and what the earlier bespoke shape was not:
 
@@ -120,7 +119,7 @@ Added are the year, the anchor capacity, kg instead of kg/kWh, and the six
 statistics named as `RAWCLICVehicleElectronics` names them. 9 files, 16,005 rows,
 with the per-draw arrays beside them — the distribution next to the value.
 
-`06` still writes the segment-year files; they were kept deliberately.
+`03` still writes the segment-year files; they were kept deliberately.
 
 ### What changed today
 
@@ -157,11 +156,11 @@ now carry a mass; the rest is labelled `unknownBatteryMaterial`.
 `composition_status` separates `packaging_from_base`, `unknown_remainder` and
 `unknown`.
 
-**A trap worth knowing about.** The density trajectory was once applied in `09`
-but not in `06`, so the two deliverables disagreed about the same quantity —
+**A trap worth knowing about.** The density trajectory was once applied in `03`
+but not in `03`, so the two deliverables disagreed about the same quantity —
 nickel fell 23% in one and never moved in the other — and every figure, which
-reads `06`, showed a flat line that was simply wrong. They now share
-`density_factor()` in `06`. **If you add another consumer, use that helper.**
+reads `03`, showed a flat line that was simply wrong. They now share
+`density_factor()` in `03`. **If you add another consumer, use that helper.**
 
 **What the distributions say, and it is the useful result.** Comparing
 chemistries at the same quantity: lithium spans 6.55–9.90 kg across chemistries
@@ -242,9 +241,9 @@ and reaches 2.68 by 2060.
 
 ## 5. Open
 
-0. **The figures were rejected and rebuilt.** Settled 2026-09-10. `07` now draws
+0. **The figures were rejected and rebuilt.** Settled 2026-09-10. `03` now draws
    all elements in one stacked figure per chemistry, plus one figure per critical
-   raw material across every chemistry; `08` draws one figure per material with
+   raw material across every chemistry; `03` draws one figure per material with
    every chemistry's distribution overlaid in absolute kg. Two constraints he
    stated and neither should be undone: **no log scales**, and **no small
    figures** — so no facet grids, one subject per full-size figure.
@@ -286,11 +285,11 @@ and reaches 2.68 by 2060.
 | `src/composition.py` | composition at any capacity, with uncertainty; `element_draws_at()` returns the draws themselves |
 | `src/ev_details.py` | the vehicle table: parsing, smoothing, bootstrap |
 | `src/scenarios.py` | the three scenarios and the returning mix |
-| `06_generate_composition_files.py` | the deliverable, including `build_unknown_rows` for the two unknown chemistries |
+| `05_generate_composition_files.py` | the deliverable, including `build_unknown_rows` for the two unknown chemistries |
 | `export.unknown_chemistry_template` | what may be claimed about sodium and solid-state, and why |
 | `data/raw/` | the two inputs — **not in git**, supplied via iCloud |
 | `data/composition/` | nine segment-year CSVs plus `element_draws/` — generated |
-| `data/consolidated/` | **the deliverable** — nine files in the workbook schema plus their draw arrays, from `09` |
+| `data/consolidated/` | **the deliverable** — nine files in the workbook schema plus their draw arrays, from `03` |
 | `technology.chemistry_energy_density` | every chemistry's trajectory, and the reasoning for each |
 | `technology.cell_density_override_wh_per_kg` | where the workbook's density is not believed — currently LMFP only |
 | `figures/` | nine figures — generated |

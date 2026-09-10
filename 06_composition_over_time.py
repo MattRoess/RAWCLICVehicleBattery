@@ -1,13 +1,13 @@
 """
-07_composition_over_time.py
+06_composition_over_time.py
 ===========================
 
 What one BEV's battery is made of, 2020 to 2070, and what that costs in critical
 raw materials.
 
     ./.venv/bin/python 00_parameters.py                    # first, always
-    ./.venv/bin/python 06_generate_composition_files.py    # writes what this reads
-    ./.venv/bin/python 07_composition_over_time.py
+    ./.venv/bin/python 05_generate_composition_files.py    # writes what this reads
+    ./.venv/bin/python 06_composition_over_time.py
 
 TWO KINDS OF FIGURE, both full size.
 
@@ -63,7 +63,7 @@ def load_composition(params) -> pd.DataFrame:
     if not files:
         raise FileNotFoundError(
             f"no composition files in {directory}. Run "
-            "06_generate_composition_files.py first -- this script draws what "
+            "05_generate_composition_files.py first -- this script draws what "
             "that one computes, and does not recompute it.")
     frames = [pd.read_csv(path) for path in files]
     rows = pd.concat(frames, ignore_index=True)

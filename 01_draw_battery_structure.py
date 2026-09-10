@@ -257,7 +257,7 @@ def draw(cell_side: list[dict], pack_side: list[dict], params: Params) -> plt.Fi
         column, row = index % 2, index // 2
         draw_box(ax,
                  column * (drawing.box_width + drawing.box_gap_x),
-                 49 - row * (BOX_HEIGHT + 2.8),
+                 49 - row * (BOX_HEIGHT + drawing.box_gap_y),
                  drawing.box_width, BOX_HEIGHT, entry)
 
     # ---- right branch: the pack, shared by every chemistry ---------------
@@ -269,11 +269,10 @@ def draw(cell_side: list[dict], pack_side: list[dict], params: Params) -> plt.Fi
             fontsize=8, color=MUTED, va="top")
 
     for index, entry in enumerate(pack_side):
-        draw_box(ax, 56, 49 - index * (BOX_HEIGHT + 2.8),
+        draw_box(ax, 56, 49 - index * (BOX_HEIGHT + drawing.box_gap_y),
                  drawing.box_width + 12, BOX_HEIGHT, entry)
 
     # ---- the two chemistries the workbook does not contain ---------------
-    import textwrap
     # The lowest box bottom is 52 - 3*(box_height + gap) = 16.0, so this block
     # starts below that. Anything above 16 lands inside the last row.
     ax.text(0, -1.5, "NOT IN THE WORKBOOK — built from a base chemistry",

@@ -1,5 +1,5 @@
 """
-06_generate_composition_files.py
+05_generate_composition_files.py
 ================================
 
 Writes the composition files the stock-and-flow model reads: **one file per
@@ -7,7 +7,7 @@ chemistry**, one row per component / material / element, for **one car** of a
 given segment in a given year.
 
     ./.venv/bin/python 00_parameters.py                # first, always
-    ./.venv/bin/python 06_generate_composition_files.py
+    ./.venv/bin/python 05_generate_composition_files.py
 
 NO CHEMISTRY MIXING HAPPENS HERE, by design. The scenario shares are applied
 downstream, where the fleet numbers live. This project knows what a battery is

@@ -124,28 +124,37 @@ def draw_totals(model: CompositionModel, capacities: np.ndarray):
     params = model.params
     figure_params, mc = params.capacity_figure, params.monte_carlo
     chemistries = sorted(set(model._series.keys["chemistry"]) - {params.scope.pack_level_key})
-    highlighted = figure_params.components_figure_chemistry
     last_anchor = float(model._series.capacities[-1])
 
     fig, (ax_mass, ax_density) = plt.subplots(
         1, 2, figsize=figure_params.totals_figure_size_in)
 
+    # EVERY chemistry drawn the same, and every one with its band. One used to be
+    # thicker and fully opaque while the rest were thin and faded, which made an
+    # arbitrary chemistry look like the answer; and the band was drawn for that
+    # one alone, so six of seven showed no uncertainty at all and the density
+    # panel showed none whatever. The data was always there for all of them.
     colours = plt.get_cmap("tab10")
+    low = f"mass_p{mc.lower_percentile:g}"
+    high = f"mass_p{mc.upper_percentile:g}"
     for index, chemistry in enumerate(chemistries):
         curve = model.total_mass_curve(capacities, chemistry=chemistry)
-        is_highlighted = chemistry == highlighted
-        ax_mass.plot(curve.capacity_kwh, curve.mass_kg, color=colours(index % 10),
-                     linewidth=2.2 if is_highlighted else 1.2,
-                     alpha=1.0 if is_highlighted else 0.75, label=chemistry)
+        colour = params.scenarios.workbook_chemistry_colours.get(
+            chemistry, colours(index % 10))
+        ax_mass.plot(curve.capacity_kwh, curve.mass_kg, color=colour,
+                     linewidth=1.1, label=chemistry)
         ax_density.plot(curve.capacity_kwh, curve.capacity_kwh * 1000 / curve.mass_kg,
-                        color=colours(index % 10),
-                        linewidth=2.2 if is_highlighted else 1.2,
-                        alpha=1.0 if is_highlighted else 0.75)
-        if is_highlighted and mc.enabled:
-            ax_mass.fill_between(curve.capacity_kwh,
-                                 curve[f"mass_p{mc.lower_percentile:g}"],
-                                 curve[f"mass_p{mc.upper_percentile:g}"],
-                                 color=colours(index % 10), alpha=0.2, linewidth=0)
+                        color=colour, linewidth=1.1)
+        if mc.enabled and low in curve:
+            ax_mass.fill_between(curve.capacity_kwh, curve[low], curve[high],
+                                 color=colour, alpha=0.13, linewidth=0)
+            # Wh/kg is capacity over mass, so the mass band inverts: the HIGH
+            # mass gives the LOW specific energy.
+            ax_density.fill_between(
+                curve.capacity_kwh,
+                curve.capacity_kwh * 1000 / curve[high],
+                curve.capacity_kwh * 1000 / curve[low],
+                color=colour, alpha=0.13, linewidth=0)
 
     for ax in (ax_mass, ax_density):
         _mark_extrapolation(ax, last_anchor, capacities[-1])
@@ -161,7 +170,8 @@ def draw_totals(model: CompositionModel, capacities: np.ndarray):
     ax_density.set_title("What that implies for energy density", fontsize=10, loc="left")
 
     fig.suptitle(
-        f"Whole-battery mass against capacity, by chemistry — band shown for {highlighted}\n"
+        "Whole-battery mass against capacity, by chemistry — band is the "
+        f"{mc.lower_percentile:g}\u2013{mc.upper_percentile:g} percentile of the Monte Carlo\n"
         f"shaded area past {last_anchor:g} kWh is extrapolated, not data",
         fontsize=11, ha="left", x=0.008, y=0.99)
     fig.text(0.008, 0.005,

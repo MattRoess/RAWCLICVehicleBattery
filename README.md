@@ -24,10 +24,9 @@ It is the battery counterpart to `RAWCLICVehicleComposition` (whole car) and
 | `99_check_environment.py` | Checks the interpreter, the pinned packages and the workbook, and prints the workbook's real structure. Writes nothing. |
 | `01_draw_battery_structure.py` | Draws every component of the BEV battery, labelled with the workbook's own `Layer 2` codes. |
 | `02_composition_by_capacity.py` | The composition at **any** capacity, with a Monte Carlo band. Prints a table and writes two figures. |
-| `03_capacity_by_segment_over_time.py` | Battery capacity by segment and year from `EV_details.csv`, smoothed, with the market spread and a bootstrap band. One figure per capacity basis. |
-| `04_capacity_by_chemistry.py` | The same, split by cathode chemistry — LFP, NCA, NMC_middle, NMC_high — where at least 5 distinct models carry it. Prints the table too. |
-| `05_chemistry_scenarios.py` | Three chemistry scenarios to 2070, and the mix arriving for recycling once vehicle life and second life are applied. **Assumption, not data.** |
-| `06_generate_composition_files.py` | Writes the composition files for the stock-and-flow model: **nine files**, one per chemistry, one row per component/material/element, **for one car**. No chemistry mixing — the split happens downstream. Sodium-ion and solid-state are written with empty masses and `composition_status = "unknown"`. |
+| `03_capacity_by_chemistry.py` | The same, split by cathode chemistry — LFP, NCA, NMC_middle, NMC_high — where at least 5 distinct models carry it. Prints the table too. |
+| `04_chemistry_scenarios.py` | Three chemistry scenarios to 2070, and the mix arriving for recycling once vehicle life and second life are applied. **Assumption, not data.** |
+| `05_generate_composition_files.py` | Writes the composition files for the stock-and-flow model: **nine files**, one per chemistry, one row per component/material/element, **for one car**. No chemistry mixing — the split happens downstream. Sodium-ion and solid-state are written with empty masses and `composition_status = "unknown"`. |
 
 `02` takes arguments:
 

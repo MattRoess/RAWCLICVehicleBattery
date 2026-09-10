@@ -1,11 +1,11 @@
 """
-04_capacity_by_chemistry.py
+03_capacity_by_chemistry.py
 ===========================
 
 Battery capacity by segment AND cathode chemistry, over time.
 
     ./.venv/bin/python 00_parameters.py            # first, always
-    ./.venv/bin/python 04_capacity_by_chemistry.py
+    ./.venv/bin/python 03_capacity_by_chemistry.py
 
 Prints the capacity table per segment and chemistry, and writes one figure per
 capacity basis to paths.output_dir.

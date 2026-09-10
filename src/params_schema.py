@@ -152,7 +152,7 @@ class DrawingParams:
 
     # Vertical gap between rows of boxes.
     # SAFE TO CHANGE: yes.
-    box_gap_y: float = 2.4
+    box_gap_y: float = 2.8
 
     # The order the cell-level components are drawn in: assembly order, not
     # alphabetical -- what stores the charge, then what carries it out, then what
@@ -508,10 +508,6 @@ class EVDetailsParams:
     # SAFE TO CHANGE: yes.
     bootstrap_seed: int | None = 20260908
 
-    # Draw the individual models behind the bands, so the reader can see how
-    # many there are and how scattered.
-    # SAFE TO CHANGE: yes -- presentation only.
-    show_model_scatter: bool = True
 
     # HOW THE CATHODE MATERIAL IS GROUPED. The file states 11 different values;
     # these are the groups they are collapsed into.
@@ -554,17 +550,9 @@ class EVDetailsParams:
         "NMC_high": "#1f5f8b",
     })
 
-    # The figures, in paths.output_dir. '{basis}' is filled with 'nominal' or
-    # 'useable', so the two cannot overwrite each other or be mistaken for one
-    # another later.
-    # SAFE TO CHANGE: yes. Keep '{basis}' and the .png suffix.
-    capacity_over_time_file_name: str = "bev_capacity_by_segment_over_time_{basis}.png"
-
-    # SAFE TO CHANGE: yes.
-    capacity_over_time_figure_size_in: tuple[float, float] = (17.0, 8.5)
-
     # Capacity by segment AND chemistry, in paths.output_dir. '{basis}' is
-    # filled as above.
+    # filled with 'nominal' or 'useable', so the two cannot overwrite each other
+    # or be mistaken for one another later.
     # SAFE TO CHANGE: yes. Keep '{basis}' and the .png suffix.
     capacity_by_chemistry_file_name: str = "bev_capacity_by_segment_and_chemistry_{basis}.png"
 
@@ -765,7 +753,6 @@ class SecondLifeParams:
 
     # SAFE TO CHANGE: yes. Keep the .png suffix.
     returning_mix_file_name: str = "chemistry_returning_for_recycling.png"
-    returning_mix_figure_size_in: tuple[float, float] = (16.0, 9.0)
 
 
 @dataclass
@@ -1026,7 +1013,7 @@ class ExportParams:
             # one-for-one from a monopolar NMC pack.
             "mass_scale": {"currentCollectorAnode": {"Cu": 0.5},
                            "currentCollectorCathode": {"Al": 0.5}},
-            # See 06_generate_composition_files.py: the frame, the thermal
+            # See 05_generate_composition_files.py: the frame, the thermal
             # conductor, the cables and the collectors are scaled by the base
             # chemistry's pack density over solid-state's, because a structure
             # sized for 190 Wh/kg is far too heavy around a 510 Wh/kg stack.
@@ -1530,15 +1517,6 @@ class Params:
             raise ParameterError(
                 f"ev_details.min_effective_models must be positive: "
                 f"{ev.min_effective_models}")
-        if not ev.capacity_over_time_file_name.endswith(".png"):
-            raise ParameterError(
-                "ev_details.capacity_over_time_file_name must end in '.png': "
-                f"{ev.capacity_over_time_file_name!r}")
-        if "{basis}" not in ev.capacity_over_time_file_name:
-            raise ParameterError(
-                "ev_details.capacity_over_time_file_name must contain '{basis}', "
-                "or the nominal and useable figures overwrite each other: "
-                f"{ev.capacity_over_time_file_name!r}")
         if not ev.chemistry_groups:
             raise ParameterError("ev_details.chemistry_groups is empty.")
         seen: dict[str, str] = {}

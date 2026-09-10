@@ -1,12 +1,12 @@
 """
-09_consolidated_composition.py
+08_consolidated_composition.py
 ==============================
 
 The deliverable in the workbook's own schema: kg of each material, per chemistry,
 per capacity anchor, per year.
 
     ./.venv/bin/python 00_parameters.py                  # first, always
-    ./.venv/bin/python 09_consolidated_composition.py
+    ./.venv/bin/python 08_consolidated_composition.py
 
 ONE FILE PER CHEMISTRY, so none of them gets big, into
 `export.consolidated_output_dir`. Beside each, the per-draw arrays that the
@@ -122,7 +122,7 @@ def main(argv: list[str] | None = None) -> int:
 
     import importlib.util
     spec = importlib.util.spec_from_file_location(
-        "generator", PROJECT_ROOT / "06_generate_composition_files.py")
+        "generator", PROJECT_ROOT / "05_generate_composition_files.py")
     generator = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(generator)
 
