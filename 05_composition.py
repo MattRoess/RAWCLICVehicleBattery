@@ -56,7 +56,6 @@ import pandas as pd  # noqa: E402
 
 from src.composition import (CompositionError, CompositionModel,  # noqa: E402
                              approximate_mode)
-from src.ev_details import EVDetails, EVDetailsError  # noqa: E402
 from src.params_schema import ParameterError, current  # noqa: E402
 
 LAST_OBSERVED_YEAR = 2026
@@ -110,99 +109,6 @@ def improvement_factor_draws(params, year: float) -> np.ndarray | None:
     if not params.monte_carlo.enabled:
         return None
     return 1.0 - improvement_share(params, year) * improvement_draws(params)
-
-
-def capacity_growth_factor(params, segment: str, year: float, base_year: float) -> float:
-    """
-    Multiplier on a PROJECTED capacity under the grow_* scenarios.
-
-    The chemistry cost saving (NMC -> LFP -> sodium) can be taken as a cheaper
-    car or as a bigger battery. Through 2026 it went to price: at equal capacity
-    and segment an LFP car is 17.7% cheaper, and at equal price it carries only
-    2.0% +/- 1.8 pp more kWh. The grow_* scenarios assume part of it turns into
-    capacity instead, and only where price competition is the binding
-    constraint -- A-D, not E/F. Compounded per decade, from the segment's last
-    fitted year.
-    """
-    export = params.export
-    if export.capacity_scenario == "saturate":
-        return 1.0
-    if segment not in export.capacity_growth_segments:
-        return 1.0
-    rate = export.capacity_growth_per_decade[export.capacity_scenario]
-    decades = max(0.0, (float(year) - float(base_year)) / 10.0)
-    return float((1.0 + rate) ** decades)
-
-
-def segment_capacities(params, ev: EVDetails, segments: list[str]) -> pd.DataFrame:
-    """Nominal capacity per segment per export year, marked observed or projected."""
-    export = params.export
-    years = params.export_years()
-    rows = []
-
-    for segment in segments:
-        fitted = pd.Series(dtype=float)
-        try:
-            curve = ev.curve(segment)
-            fitted = pd.Series(curve.central, index=curve.years.astype(int)).dropna()
-        except EVDetailsError:
-            pass
-
-        if fitted.empty:
-            # Too thin to fit a curve, but the segment still has to be exported:
-            # all twelve appear in the stock-and-flow model whatever the EV
-            # database knows about them.
-            own = ev.models.loc[ev.models.segment == segment, "capacity_kwh"].dropna()
-            if params.ev_details.capacity_fallback == "segment_median" and len(own):
-                value, source = float(own.median()), "segment_median"
-                print(f"[export] segment {segment}: too few models to fit a curve "
-                      f"({len(own)}); using their median, {value:.1f} kWh.")
-            else:
-                value = params.ev_details.reference_battery_size_map.get(segment)
-                source = "reference_map"
-                if value is None:
-                    print(f"[export] segment {segment}: no models and no map entry "
-                          "-- skipped.")
-                    continue
-                print(f"[export] segment {segment}: no usable models; using "
-                      f"battery_size_map, {value:g} kWh.")
-            for year in years:
-                # No fit, so there is no segment-specific last observed year:
-                # grow from the year the database itself ends.
-                grown = value * capacity_growth_factor(params, segment, year,
-                                                       LAST_OBSERVED_YEAR)
-                rows.append({"segment": segment, "year": year,
-                             "capacity_kwh_nominal": round(float(grown), 2),
-                             "capacity_is_projected": True,
-                             "capacity_source": source})
-            continue
-
-        last_year = int(fitted.index.max())
-        last_value = float(fitted.loc[last_year])
-        # Gradient of the final decade, used only by 'trend'.
-        window = fitted.loc[fitted.index >= last_year - 10]
-        gradient = (0.0 if len(window) < 2 else
-                    float(np.polyfit(window.index.astype(float), window.to_numpy(), 1)[0]))
-
-        for year in years:
-            if year in fitted.index:
-                capacity, projected = float(fitted.loc[year]), False
-            elif year < fitted.index.min():
-                # Before the fit starts, hold the earliest fitted year rather
-                # than running a gradient backwards into four data points.
-                capacity, projected = float(fitted.iloc[0]), True
-            else:
-                capacity = (last_value if export.capacity_projection == "hold"
-                            else last_value + gradient * (year - last_year))
-                capacity *= capacity_growth_factor(params, segment, year, last_year)
-                projected = True
-            capacity = float(np.clip(capacity, params.interpolation.min_capacity_kwh,
-                                     export.max_projected_capacity_kwh))
-            rows.append({"segment": segment, "year": year,
-                         "capacity_kwh_nominal": round(capacity, 2),
-                         "capacity_is_projected": projected,
-                         "capacity_source": "fitted"})
-    return pd.DataFrame(rows)
 
 
 def scale_element_masses(rows: pd.DataFrame, by_component: dict, mass_columns) -> None:
@@ -484,101 +390,6 @@ def apply_material_overrides(rows: pd.DataFrame, params) -> pd.DataFrame:
                                    "the split between them is not known")
             expanded.append(new)
     return pd.concat([keep, pd.DataFrame(expanded)], ignore_index=True) if expanded else keep
-
-
-def segment_consumption(params, ev: EVDetails) -> pd.Series:
-    """Real-world Wh/km per segment: the parameter if set, else the file."""
-    tech = params.technology
-    if tech.segment_consumption_wh_per_km:
-        return pd.Series(tech.segment_consumption_wh_per_km, dtype=float)
-
-    raw = pd.read_csv(params.ev_details_path(PROJECT_ROOT), low_memory=False)
-    column = "real-consumption_combined_mild_weather"   # values look like '157 Wh/km'
-    if column not in raw.columns:
-        raise EVDetailsError(
-            f"{column!r} is not in EV_details.csv, so a range target cannot be turned "
-            "into a capacity. Set technology.segment_consumption_wh_per_km instead.")
-    consumption = raw[["car_id", column]].copy()
-    consumption["wh_per_km"] = consumption[column].map(
-        lambda value: float(pd.Series([value]).str.extract(r"([\d.]+)")[0].iloc[0])
-        if pd.notna(value) else float("nan"))
-    merged = ev.models.merge(consumption[["car_id", "wh_per_km"]], on="car_id", how="left")
-    recent = merged[merged.first_year >= tech.consumption_from_year]
-    return recent.groupby("segment")["wh_per_km"].median().dropna()
-
-
-def range_saturated_capacities(params, ev: EVDetails, capacities: pd.DataFrame,
-                               chemistry: str) -> pd.DataFrame:
-    """
-    Capacity set by a range target rather than by the segment's history.
-
-    Once energy density stops binding there is no reason to carry range nobody
-    drives, so the pack is sized for `technology.range_saturation_km` and the
-    remaining density gain shows up as less mass. The capacity is the input; the
-    mass saving is what falls out of it.
-    """
-    tech = params.technology
-    consumption = segment_consumption(params, ev)
-
-    out = capacities.copy()
-    out["pack_wh_per_kg"] = out.year.map(
-        lambda year: pack_density(params, chemistry, year))
-    wh_per_km = out.segment.map(consumption)
-    unknown = sorted(out.loc[wh_per_km.isna(), "segment"].unique())
-    if unknown:
-        print(f"[export] no consumption figure for {unknown} -- those segments keep "
-              "their historical capacity.")
-    saturated = wh_per_km * tech.range_saturation_km / 1000.0
-    # NOT capped by export.max_projected_capacity_kwh. That ceiling exists to
-    # keep a projected capacity inside the composition model's answerable range;
-    # this chemistry's composition is never computed, so clipping here would only
-    # fail to meet the range target while making the mass saving look better than
-    # the assumption gives.
-    out["capacity_kwh_nominal"] = saturated.fillna(out.capacity_kwh_nominal).round(2)
-    out["capacity_is_projected"] = True
-    out["pack_mass_kg_implied"] = (out.capacity_kwh_nominal * 1000.0
-                                   / out.pack_wh_per_kg).round(1)
-    out["wh_per_km"] = wh_per_km
-    return out
-
-
-def pack_density(params, chemistry: str, year: float) -> float:
-    """
-    Pack Wh/kg for a chemistry in a given year, from its density trajectory.
-
-    Two conversions in one place, because both were being got wrong. The
-    trajectory may be quoted at CELL level -- which is how solid-state figures
-    are usually published -- in which case it is multiplied by the packing
-    ratio; and it is a trajectory rather than a constant, because a chemistry
-    entering in 2040 and still being built in 2070 does not have one density for
-    thirty years.
-    """
-    entry = params.technology.chemistry_energy_density[chemistry]
-    value = float(np.interp(float(year), np.asarray(entry["years"], dtype=float),
-                            np.asarray(entry["wh_per_kg"], dtype=float)))
-    if entry["basis"] == "cell":
-        value *= params.technology.cell_to_pack_ratio[chemistry]
-    return value
-
-
-def density_factor(params, chemistry: str, year: float) -> float:
-    """
-    How much lighter the same kWh is in `year` than in the base year.
-
-    One over the density gain: a chemistry that is 30% more energy dense needs
-    1/1.3 = 0.77 of the material for the same energy. Chemistries with no
-    trajectory return 1.0 and are untouched.
-
-    ⚠️ NO LONGER SCALES MASS. The mass improvement is a DRAWN quantity now --
-    see improvement_factor / improvement_factor_draws -- because how much
-    lighter a cell gets by 2070 is not known to three figures. This is kept
-    only for pack_density's range-target arithmetic, which needs the
-    trajectory itself rather than a mass multiplier.
-    """
-    if chemistry not in params.technology.chemistry_energy_density:
-        return 1.0
-    base = pack_density(params, chemistry, float(params.export.density_base_year))
-    return base / pack_density(params, chemistry, float(year))
 
 
 def build_unknown_rows(model: CompositionModel, params, capacities: pd.DataFrame,
@@ -1012,109 +823,36 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     export = params.export
-    segments = (list(params.ev_details.car_segments)
-                + list(params.ev_details.jellybean_segments))
 
     try:
         model = CompositionModel(params, project_root=PROJECT_ROOT)
-        ev_params = params  # capacity_basis already defaults to nominal
-        if ev_params.ev_details.capacity_basis != "nominal":
+        if params.ev_details.capacity_basis != "nominal":
             print("[export] WARNING: ev_details.capacity_basis is "
-                  f"{ev_params.ev_details.capacity_basis!r}, but the workbook's kg/kWh "
+                  f"{params.ev_details.capacity_basis!r}, but the workbook's kg/kWh "
                   "is per NOMINAL kWh. Every mass below is on the wrong basis.")
-        ev = EVDetails(ev_params, project_root=PROJECT_ROOT)
-        capacities = segment_capacities(params, ev, segments)
-    except (CompositionError, EVDetailsError) as error:
+    except CompositionError as error:
         print(f"{error}", file=sys.stderr)
-        return 1
-
-    if capacities.empty:
-        print("No segment produced a capacity series -- nothing to export.", file=sys.stderr)
         return 1
 
     chemistries = sorted(set(model._series.keys.chemistry) - {params.scope.pack_level_key})
     missing = list(params.scenarios.chemistries_without_composition)
 
     print(f"Export years: {params.export_years()}")
-    print(f"Segments    : {sorted(capacities.segment.unique())}")
-    print(f"Capacity    : fitted to {LAST_OBSERVED_YEAR}, then "
-          f"'{export.capacity_projection}', capped at {export.max_projected_capacity_kwh:g} kWh")
-    if export.capacity_scenario == "saturate":
-        print("              scenario 'saturate': the chemistry cost saving goes to "
-              "price, not capacity -- which is what 2019-2026 shows.")
-    else:
-        rate = export.capacity_growth_per_decade[export.capacity_scenario]
-        print(f"              scenario '{export.capacity_scenario}': ASSUMED "
-              f"+{rate:.0%} per decade on projected years in "
-              f"{list(export.capacity_growth_segments)}; every other segment flat. "
-              "Nothing measured supports this -- it is the counter-assumption to "
-              "'saturate'.")
+    print("Capacity    : the workbook's own anchors "
+          f"{[int(c) for c in model._series.capacities]} kWh. Segment capacity, the "
+          "range target and the\n              fitted curve are NOT here -- they are "
+          "fleet questions and live in\n              06_segment_capacity.py, which "
+          "RAWCLICStockAndFlow supersedes.")
     print(f"Chemistries : {len(chemistries)} with composition -- {chemistries}")
     if export.write_unknown_chemistries:
-        print(f"              {len(missing)} marked unknown -- {missing}: row skeleton "
-              "only, every mass left empty.")
+        print(f"              {len(missing)} marked unknown -- {missing}: packaging "
+              "only, active materials left empty.")
     else:
         print(f"NOT written : {missing} (export.write_unknown_chemistries is off).")
 
-    written = []
     to_write = [(c, False) for c in chemistries]
     if export.write_unknown_chemistries:
         to_write += [(c, True) for c in missing]
-
-    reference_mass = None
-    for chemistry, unknown in to_write:
-        chemistry_capacities = capacities
-        if unknown and params.technology.apply_range_saturation \
-                and chemistry in params.technology.chemistry_energy_density:
-            chemistry_capacities = range_saturated_capacities(params, ev, capacities,
-                                                              chemistry)
-            if reference_mass is None:
-                reference = params.technology.reference_chemistry
-                reference_mass = {
-                    entry.segment: model.weights_at(entry.capacity_kwh_nominal,
-                                                    chemistry=reference)["mass_kg"].sum()
-                    for entry in capacities[capacities.year == capacities.year.max()]
-                    .itertuples()}
-            latest = chemistry_capacities[
-                chemistry_capacities.year == chemistry_capacities.year.max()]
-            entry = params.technology.chemistry_energy_density[chemistry]
-            trajectory = ", ".join(
-                f"{year}: {pack_density(params, chemistry, year):.0f}"
-                for year in entry["years"])
-            if export.capacity_scenario != "saturate":
-                # The growth scenario never reaches this chemistry: its capacity
-                # comes from the range target, not from the segment history the
-                # scenario scales. Saying so beats a reader assuming otherwise.
-                print(f"  {chemistry}: NOT affected by capacity_scenario "
-                      f"'{export.capacity_scenario}' -- a range-target capacity "
-                      "ignores the segment trend entirely.")
-            print(f"\n  {chemistry}: capacity from a "
-                  f"{params.technology.range_saturation_km:g} km range target; "
-                  f"density {entry['basis']} basis"
-                  + (f" x {params.technology.cell_to_pack_ratio[chemistry]:.2f} packing"
-                     if entry["basis"] == "cell" else "")
-                  + f" -> pack Wh/kg by year [{trajectory}]")
-            for entry in latest.itertuples():
-                today = reference_mass.get(entry.segment)
-                ratio = f"{entry.pack_mass_kg_implied / today:.2f}x" if today else "n/a"
-                print(f"      {entry.segment:<3} {entry.wh_per_km:5.0f} Wh/km -> "
-                      f"{entry.capacity_kwh_nominal:6.1f} kWh, "
-                      f"{entry.pack_mass_kg_implied:6.1f} kg  ({ratio} today's "
-                      f"{today:.0f} kg)" if today else "")
-        rows = (build_unknown_rows(model, params, chemistry_capacities, chemistry) if unknown
-                else build_rows(model, params, chemistry_capacities, chemistry))
-        # 400 V and 800 V side by side, tagged in voltage_v. Doubles the rows,
-        # not the files: the consumer filters instead of choosing a file.
-        rows = apply_pack_rules(rows, params, chemistry)
-        name = f"composition_{chemistry}.{export.export_format}"
-        path = params.composition_output_path(PROJECT_ROOT, name)
-        if export.export_format == "csv":
-            rows.to_csv(path, index=False)
-        else:
-            rows.to_excel(path, index=False, sheet_name="composition")
-        written.append((path, len(rows)))
-        flag = "  << UNKNOWN, masses empty" if unknown else ""
-        print(f"  {path.name:<44} {len(rows):>7,} rows{flag}")
 
     # -----------------------------------------------------------------------
     # Per-draw element FRACTIONS, at the workbook's own capacity anchors.
@@ -1157,17 +895,6 @@ def main(argv: list[str] | None = None) -> int:
     print(f"\nWrote {n_written} per-draw fraction arrays to "
           f"{params.export.composition_output_dir}/element_draws/ "
           f"({len(anchors)} anchors x {len(chemistries)} chemistries)")
-
-    index = capacities.pivot_table(index="segment", columns="year",
-                                   values="capacity_kwh_nominal")
-    index_path = params.composition_output_path(PROJECT_ROOT,
-                                                f"capacity_by_segment_year.{export.export_format}")
-    (capacities.to_csv(index_path, index=False) if export.export_format == "csv"
-     else capacities.to_excel(index_path, index=False))
-    print(f"\nNominal capacity per car [kWh] (bold years beyond {LAST_OBSERVED_YEAR} are projected):")
-    print(index.round(1).to_string())
-    print(f"\nAlso wrote {index_path.name}")
-    print(f"\n{len(written)} files in {params.export.composition_output_dir}/")
 
     # ------------------------------------------- the consolidated files
 
@@ -1286,10 +1013,10 @@ def main(argv: list[str] | None = None) -> int:
           "one file per chemistry with its draw arrays beside it.")
 
     # ------------------------------------------------------------- figures
-    rows = pd.concat([pd.read_csv(p) for p in
-                      sorted((PROJECT_ROOT / params.export.composition_output_dir)
-                             .glob("composition_*.csv"))], ignore_index=True)
-    rows = rows[rows.level == "element"]
+    # Built here, not read back from disk. The figures used to re-read the
+    # segment-year files, which tied them to an output that has since moved to
+    # 06_segment_capacity.py -- and which had already let them drift from the
+    # rules the files carried.
     drawn = 0
 
     # COMPOSITION OVER TIME, AT A HELD CAPACITY. Not a segment: a segment's
