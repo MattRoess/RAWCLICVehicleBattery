@@ -954,7 +954,7 @@ class ExportParams:
             # one-for-one from a monopolar NMC pack.
             "mass_scale": {"currentCollectorAnode": {"Cu": 0.5},
                            "currentCollectorCathode": {"Al": 0.5}},
-            # See 05_generate_composition_files.py: the frame, the thermal
+            # See 05_composition.py: the frame, the thermal
             # conductor, the cables and the collectors are scaled by the base
             # chemistry's pack density over solid-state's, because a structure
             # sized for 190 Wh/kg is far too heavy around a 510 Wh/kg stack.

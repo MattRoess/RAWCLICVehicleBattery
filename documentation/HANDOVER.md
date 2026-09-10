@@ -88,7 +88,7 @@ Repository: <https://github.com/MattRoess/RAWCLICVehicleBattery>. Branch
 it, `git log --oneline main..HEAD` — a count written here goes stale the next
 time anyone commits, as it already did once.
 
-All nine scripts run. `03` takes **5 min 15 s** at 200,000 draws — timed.
+All seven scripts run. `03` takes **5 min 15 s** at 200,000 draws — timed.
 
 ```bash
 ./.venv/bin/python 00_parameters.py                 # always first
@@ -97,13 +97,10 @@ All nine scripts run. `03` takes **5 min 15 s** at 200,000 draws — timed.
 ./.venv/bin/python 02_composition_by_capacity.py
 ./.venv/bin/python 03_capacity_by_chemistry.py
 ./.venv/bin/python 04_chemistry_scenarios.py
-./.venv/bin/python 05_generate_composition_files.py # segment-year files
-./.venv/bin/python 06_composition_over_time.py     # figures, one per element
-./.venv/bin/python 07_composition_distributions.py # figures, one per chemistry
-./.venv/bin/python 08_consolidated_composition.py  # THE DELIVERABLE
+./.venv/bin/python 05_composition.py   # THE DELIVERABLE, and every figure
 ```
 
-**`03` is the one to hand on.** It writes `data/consolidated/`, one file per
+**`05_composition.py` is the one to hand on.** It writes `data/consolidated/`, one file per
 chemistry in the INPUT WORKBOOK'S OWN SCHEMA, expanded — which is what the rest
 of RAWCLIC expects and what the earlier bespoke shape was not:
 
@@ -285,7 +282,7 @@ and reaches 2.68 by 2060.
 | `src/composition.py` | composition at any capacity, with uncertainty; `element_draws_at()` returns the draws themselves |
 | `src/ev_details.py` | the vehicle table: parsing, smoothing, bootstrap |
 | `src/scenarios.py` | the three scenarios and the returning mix |
-| `05_generate_composition_files.py` | the deliverable, including `build_unknown_rows` for the two unknown chemistries |
+| `05_composition.py` | the deliverable, including `build_unknown_rows` for the two unknown chemistries |
 | `export.unknown_chemistry_template` | what may be claimed about sodium and solid-state, and why |
 | `data/raw/` | the two inputs — **not in git**, supplied via iCloud |
 | `data/composition/` | nine segment-year CSVs plus `element_draws/` — generated |

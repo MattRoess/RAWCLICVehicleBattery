@@ -1,32 +1,30 @@
 """
-05_generate_composition_files.py
-================================
+05_composition.py
+=================
 
-Writes the composition files the stock-and-flow model reads: **one file per
-chemistry**, one row per component / material / element, for **one car** of a
-given segment in a given year.
+The whole composition step, in one file: the segment-year files, the
+consolidated files in the workbook's own schema, the per-draw arrays, and every
+figure that draws them.
 
-    ./.venv/bin/python 00_parameters.py                # first, always
-    ./.venv/bin/python 05_generate_composition_files.py
+    ./.venv/bin/python 00_parameters.py     # first, always
+    ./.venv/bin/python 05_composition.py
 
-NO CHEMISTRY MIXING HAPPENS HERE, by design. The scenario shares are applied
-downstream, where the fleet numbers live. This project knows what a battery is
-made of; the stock-and-flow model knows how many there are. Baking a scenario
-into these files would tie them to an assumption they ought to outlive -- and
-the same file then serves all three scenarios, and any later one.
+WHY ONE FILE. This was four scripts. They built the SAME Monte Carlo twice --
+once for the segment-year files, once for the consolidated ones -- and passed
+results between themselves through the filesystem, one of them reaching into
+another with spec_from_file_location on a literal filename, a reference no
+linter can check and one that broke silently when the scripts were renumbered.
+The model is now built once and everything downstream reads it in memory.
 
-WHAT EACH ROW IS
-----------------
-One car. `mass_kg` is the material in a single battery of that segment, year and
-chemistry -- multiply by vehicle counts downstream, never by a share here.
+WHAT IT WRITES
 
-WHERE THE CAPACITY COMES FROM
------------------------------
-The fitted nominal capacity for that segment and year (`03`), which is real data
-to 2026. **Beyond 2026 it is an assumption**, set by `export.capacity_projection`
--- 'hold' keeps the 2026 figure, 'trend' continues the gradient. Every row
-carries `capacity_is_projected` so a downstream user cannot mistake one for the
-other.
+  data/composition/            one file per chemistry, per SEGMENT and year,
+                               plus element_draws/ at the capacity anchors
+  data/consolidated/           one file per chemistry in the input workbook's
+                               own schema, per capacity ANCHOR and year, with
+                               its draw arrays beside it -- the deliverable
+  figures/                     composition over time per chemistry, one figure
+                               per critical raw material, and the distributions
 
 ⚠️ NOMINAL, NOT USEABLE. The workbook's kg/kWh is per nominal kWh. Useable runs
 about 5% lower and would understate every mass by that much.
@@ -35,18 +33,10 @@ about 5% lower and would understate every mass by that much.
 batteryCellSeparator have no element rows in the workbook -- about 8% of pack
 mass. Both levels are written so the gap is visible rather than inferred.
 
-⚠️ SODIUM-ION AND SOLID-STATE ARE WRITTEN, AND MARKED. They have no composition
-in the workbook, so their files carry the expected ROW SKELETON with every mass
-left EMPTY and `composition_status = "unknown"`. Nothing is substituted from a
-lookalike chemistry. A file of blanks is harder to overlook downstream than a
-missing file, and the stock-and-flow model can carry the chemistry through and
-see the gap arrive rather than silently dropping that share of the fleet.
-
-The skeleton itself is a structural assumption, set in
-`export.unknown_chemistry_template`, and it is the only thing asserted about
-those two: sodium swaps aluminium for copper on the anode current collector;
-bipolar solid-state has no separator, no liquid electrolyte and no per-cell
-terminals, and an anode of lithium or sodium metal rather than graphite.
+⚠️ SODIUM-ION AND SOLID-STATE have no composition in the workbook. Only their
+PACKAGING is claimed; the cathode, anode and electrolyte are written as
+unknownBatteryMaterial. What may be claimed about them, and why, is in
+`export.unknown_chemistry_template`.
 """
 
 from __future__ import annotations
@@ -58,10 +48,14 @@ PROJECT_ROOT = Path(__file__).resolve().parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+import matplotlib  # noqa: E402
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt  # noqa: E402
 import numpy as np  # noqa: E402
 import pandas as pd  # noqa: E402
 
-from src.composition import CompositionError, CompositionModel  # noqa: E402
+from src.composition import (CompositionError, CompositionModel,  # noqa: E402
+                             approximate_mode)
 from src.ev_details import EVDetails, EVDetailsError  # noqa: E402
 from src.params_schema import ParameterError, current  # noqa: E402
 
@@ -490,6 +484,250 @@ def build_unknown_rows(model: CompositionModel, params, capacities: pd.DataFrame
             "figure, not a composition")
     return rows
 
+# ---------------------------------------------------------------- constants
+# The input workbook's own column order for the consolidated export, then what
+# this file adds.
+WORKBOOK_COLUMNS = ["additionalSpecification", "Layer 1", "Layer 2", "Layer 4",
+                    "parameterCode", "UoM", "DQS"]
+ADDED_COLUMNS = ["productionYear", "capacity_kwh", "Value", "min_value",
+                 "max_value", "count_value", "meanValue", "medianValue",
+                 "modeValue", "STD", "p025", "p975"]
+LEVEL_CODES = {"component": "component_parameter_code",
+               "material": "material_parameter_code",
+               "element": "element_parameter_code"}
+
+# The two chemistries with no composition in the workbook, drawn dashed.
+UNKNOWN_COMPOSITION = ("Na_ion", "solid_state")
+
+
+
+def rows_for(model: CompositionModel, params, chemistry: str, capacity: float
+             ) -> pd.DataFrame:
+    """Every level at one anchor, in the workbook's shape, in kg, before the year."""
+    scope = params.scope
+    frames = []
+    for level, attribute in LEVEL_CODES.items():
+        try:
+            table = model.weights_at(capacity, chemistry=chemistry, level=level)
+        except CompositionError:
+            continue                       # not every level resolves for every chemistry
+        band = params.monte_carlo
+        frame = pd.DataFrame({
+            "additionalSpecification": f"BATTinELV_BEV_{int(capacity)}kWh",
+            "Layer 1": table["chemistry"],
+            "Layer 2": table["component"],
+            "Layer 4": table["element"] if "element" in table else "n/a",
+            "parameterCode": getattr(scope, attribute),
+            "UoM": "kg",
+            "capacity_kwh": float(capacity),
+            "Value": table["mass_kg"],
+            "min_value": table["mass_kg"] * (1.0 - band.relative_band),
+            "max_value": table["mass_kg"] * (1.0 + band.relative_band),
+            "meanValue": table["mass_mean"],
+            "medianValue": table["mass_median"],
+            "modeValue": table["mass_mode"],
+            "STD": table["mass_std"],
+            "p025": table["mass_p2.5"],
+            "p975": table["mass_p97.5"],
+        })
+        # DQS and count_value are the workbook's own judgement of the row and are
+        # carried through rather than recomputed. Joined on the keys the workbook
+        # itself uses, at this capacity.
+        source = model.anchors
+        source = source[source.kwh == float(capacity)]
+        keys = ["chemistry", "component", "element", "code"]
+        frame = frame.merge(
+            source[keys + ["DQS", "count_value"]].drop_duplicates(subset=keys),
+            left_on=["Layer 1", "Layer 2", "Layer 4", "parameterCode"],
+            right_on=keys, how="left").drop(columns=keys)
+        frames.append(frame)
+    return pd.concat(frames, ignore_index=True)
+
+
+
+def draw_chemistry(rows: pd.DataFrame, chemistry: str, segment: str, params):
+    """Every element of one chemistry, stacked, across the years."""
+    wanted = rows[(rows.chemistry == chemistry) & (rows.segment == segment)
+                  & (rows.element != UNKNOWN_MATERIAL)]
+    if wanted.mass_kg.notna().sum() == 0:
+        return None
+    table = (wanted.pivot_table(index="year", columns="element", values="mass_kg",
+                                aggfunc="sum").fillna(0.0).sort_index())
+    table = table.loc[:, table.sum() > 0]
+    # Heaviest at the bottom: the stack then reads as a battery, structure first.
+    table = table[table.sum().sort_values(ascending=False).index]
+
+    figure, axes = plt.subplots(figsize=(13.5, 8))
+    colours = plt.get_cmap("tab20")(np.linspace(0, 1, max(len(table.columns), 2)))
+    axes.stackplot(table.index, table.T.values, labels=table.columns,
+                   colors=colours, alpha=0.9, edgecolor="white", linewidth=0.6)
+    total = table.sum(axis=1)
+    axes.plot(total.index, total, color="0.15", linewidth=2.2,
+              label=f"total ({total.iloc[0]:.0f} → {total.iloc[-1]:.0f} kg)")
+    # THE UNCERTAINTY, on the total. Per-element bands cannot go on this figure:
+    # iron is 600x lithium, and on one linear axis lithium's band is invisible.
+    # The total's band is summed ON THE DRAWS -- the 97.5th percentile of a sum
+    # is not the sum of the 97.5th percentiles -- and the CRM figures carry the
+    # per-element bands at a scale where they can actually be read.
+    band = (wanted.groupby("year")[["mass_p2.5", "mass_p97.5"]]
+            .sum(min_count=1).reindex(total.index))
+    if band["mass_p2.5"].notna().any():
+        axes.fill_between(total.index, band["mass_p2.5"], band["mass_p97.5"],
+                          color="0.15", alpha=0.18, linewidth=0,
+                          label="total, 2.5-97.5 percentile")
+
+    unknown = chemistry in UNKNOWN_COMPOSITION
+    axes.set_xlabel("year", fontsize=11)
+    axes.set_ylabel("mass in one car [kg]", fontsize=11)
+    axes.set_title(
+        f"{chemistry} — every element, segment {segment}, 2020-2070"
+        + ("\nPACKAGING ONLY: the cathode, anode and electrolyte are not known "
+           "for this chemistry" if unknown else
+           f"\ntotal falls {100 * (1 - total.iloc[-1] / total.max()):.0f}% from its "
+           "peak as the cells improve"),
+        fontsize=12.5)
+    axes.grid(True, linestyle="--", alpha=0.3)
+    axes.set_axisbelow(True)
+    for side in ("top", "right"):
+        axes.spines[side].set_visible(False)
+    axes.legend(frameon=False, fontsize=9.5, ncol=2, loc="upper center",
+                bbox_to_anchor=(0.5, -0.09))
+    axes.set_ylim(bottom=0)
+    figure.tight_layout()
+    return figure
+
+
+
+def draw_crm(rows: pd.DataFrame, element: str, segment: str, params):
+    """One critical raw material, every chemistry, with its band."""
+    figure, axes = plt.subplots(figsize=(13, 7.5))
+    wanted = rows[(rows.element == element) & (rows.segment == segment)]
+    drawn = 0
+    for chemistry, group in wanted.groupby("chemistry"):
+        series = (group.groupby("year")[["mass_kg", "mass_p2.5", "mass_p97.5"]]
+                  .sum(min_count=1).sort_index())
+        if series.mass_kg.notna().sum() == 0:
+            continue
+        colour = params.scenarios.workbook_chemistry_colours[chemistry]
+        unknown = chemistry in UNKNOWN_COMPOSITION
+        axes.plot(series.index, series.mass_kg, label=chemistry, color=colour,
+                  linewidth=2.4, linestyle="--" if unknown else "-",
+                  marker="o", markersize=4.5)
+        if series["mass_p2.5"].notna().any():
+            axes.fill_between(series.index, series["mass_p2.5"],
+                              series["mass_p97.5"], color=colour, alpha=0.15,
+                              linewidth=0)
+        drawn += 1
+    if drawn == 0:
+        plt.close(figure)
+        return None
+
+    axes.set_xlabel("year", fontsize=11)
+    axes.set_ylabel(f"{element} in one car [kg]", fontsize=11)
+    axes.set_title(
+        f"{element} per car, segment {segment}, 2020-2070 — every chemistry\n"
+        "band is the 2.5-97.5 percentile of the Monte Carlo; dashed chemistries "
+        "have only their packaging known",
+        fontsize=12.5)
+    axes.grid(True, linestyle="--", alpha=0.3)
+    axes.set_axisbelow(True)
+    for side in ("top", "right"):
+        axes.spines[side].set_visible(False)
+    axes.legend(frameon=False, fontsize=10, ncol=2)
+    axes.set_ylim(bottom=0)
+    figure.tight_layout()
+    return figure
+
+
+
+def save_figure(figure, params, name: str) -> str:
+    path = params.output_path(PROJECT_ROOT, name)
+    figure.savefig(path, dpi=params.drawing.output_dpi, bbox_inches="tight",
+                   facecolor="white")
+    plt.close(figure)
+    return path.name
+
+
+
+def histogram_density(values: np.ndarray, grid: np.ndarray, bins: int = 200) -> np.ndarray:
+    """
+    A histogram on a shared grid, scaled to its own peak.
+
+    Deliberately not a kernel density estimate: a KDE picks a bandwidth, and a
+    bandwidth is a claim about smoothness nobody here has made. This is the same
+    histogram the mode comes from.
+    """
+    counts, edges = np.histogram(values, bins=bins, density=True)
+    centres = 0.5 * (edges[:-1] + edges[1:])
+    if counts.max() > 0:
+        counts = counts / counts.max()
+    return np.interp(grid, centres, counts, left=0.0, right=0.0)
+
+
+
+def collect_draws(model: CompositionModel, params, capacity: float, element: str | None
+            ) -> dict[str, np.ndarray]:
+    """Every chemistry's draws for one element, or for the whole pack."""
+    out: dict[str, np.ndarray] = {}
+    known = sorted(set(model._series.keys["chemistry"])
+                   - {params.scope.pack_level_key})
+    for chemistry in known:
+        try:
+            elements, masses = model.element_draws_at(capacity, chemistry=chemistry)
+        except CompositionError:
+            continue
+        if element is None:
+            row = masses.sum(axis=0)
+        else:
+            if element not in elements:
+                continue
+            row = masses[elements.index(element)]
+        if row.max() <= row.min():
+            continue                       # a fixed zero is not a distribution
+        out[chemistry] = row
+    return out
+
+
+
+def draw_distribution(series: dict[str, np.ndarray], title: str, xlabel: str, params):
+    """Every chemistry's distribution of one quantity, overlaid, in kg."""
+    if not series:
+        return None
+    low = min(np.percentile(v, 0.2) for v in series.values())
+    high = max(np.percentile(v, 99.8) for v in series.values())
+    pad = 0.06 * (high - low)
+    grid = np.linspace(low - pad, high + pad, 500)
+
+    figure, axes = plt.subplots(figsize=(13.5, 8))
+    order = sorted(series, key=lambda c: series[c].mean())
+    for chemistry in order:
+        row = series[chemistry]
+        colour = params.scenarios.workbook_chemistry_colours[chemistry]
+        curve = histogram_density(row, grid)
+        style = "--" if chemistry in UNKNOWN_COMPOSITION else "-"
+        axes.fill_between(grid, 0, curve, color=colour, alpha=0.22, linewidth=0)
+        axes.plot(grid, curve, color=colour, linewidth=2.0, linestyle=style,
+                  label=chemistry)
+        mode = float(approximate_mode(row[None, :])[0])
+        axes.plot([mode, mode], [0, 1.02], color=colour, linewidth=1.4, alpha=0.9)
+        for edge in np.percentile(row, [2.5, 97.5]):
+            axes.plot([edge, edge], [0, 0.30], color=colour, linewidth=1.0,
+                      linestyle=":", alpha=0.9)
+
+    axes.set_xlabel(xlabel, fontsize=11)
+    axes.set_ylabel("relative frequency (each scaled to its own peak)", fontsize=10.5)
+    axes.set_title(title, fontsize=12.5)
+    axes.set_ylim(0, 1.16)
+    axes.grid(True, axis="x", linestyle="--", alpha=0.3)
+    axes.set_axisbelow(True)
+    for side in ("top", "right", "left"):
+        axes.spines[side].set_visible(False)
+    axes.set_yticks([])
+    axes.legend(frameon=False, fontsize=10, ncol=3, loc="upper center",
+                bbox_to_anchor=(0.5, -0.10))
+    figure.tight_layout()
+    return figure
+
 
 def main(argv: list[str] | None = None) -> int:
     try:
@@ -635,6 +873,160 @@ def main(argv: list[str] | None = None) -> int:
     print(index.round(1).to_string())
     print(f"\nAlso wrote {index_path.name}")
     print(f"\n{len(written)} files in {params.export.composition_output_dir}/")
+
+    # ------------------------------------------- the consolidated files
+
+    anchors = [float(c) for c in model._series.capacities]
+    years = params.export_years()
+    scaled = ["Value", "min_value", "max_value", "meanValue", "medianValue",
+              "modeValue", "STD", "p025", "p975"]
+
+    directory = PROJECT_ROOT / params.export.consolidated_output_dir
+    directory.mkdir(parents=True, exist_ok=True)
+    known = sorted(set(model._series.keys["chemistry"]) - {params.scope.pack_level_key})
+    # Na_ion and solid_state are not IN the workbook, so they are not in
+    # model._series -- they are built from a base chemistry by
+    # export.unknown_chemistry_template. Leaving them out would have shipped
+    # seven files where nine were asked for.
+    unknown = sorted(params.export.unknown_chemistry_template)
+
+    print(f"{params.monte_carlo.n_draws:,} draws | anchors {[int(a) for a in anchors]} "
+          f"| years {years[0]}-{years[-1]} step {params.export.export_year_step} "
+          f"| density base {params.export.density_base_year}")
+
+    for chemistry in known:
+        has_trajectory = chemistry in params.technology.chemistry_energy_density
+        # density_factor, not a second copy of the arithmetic: 06 and
+        # 09 disagreeing about this exact quantity is what made every figure
+        # flat after 2025.
+        def factor_for(year: float) -> float:
+            return density_factor(params, chemistry, year)
+        per_year = []
+        for capacity in anchors:
+            at_anchor = rows_for(model, params, chemistry, capacity)
+            elements, draws = model.element_draws_at(capacity, chemistry=chemistry)
+            totals = draws.sum(axis=0)
+            fractions = np.zeros_like(draws)
+            live = totals > 0
+            fractions[:, live] = draws[:, live] / totals[live]
+            stem = f"{chemistry}_{int(capacity)}kWh"
+            np.save(directory / f"{stem}_draws.npy", fractions.T.astype(np.float32))
+            (directory / f"{stem}_elements.txt").write_text("\n".join(elements))
+
+            for year in years:
+                frame = at_anchor.copy()
+                frame["productionYear"] = year
+                factor = factor_for(float(year))
+                if factor != 1.0:
+                    for column in scaled:
+                        frame[column] = pd.to_numeric(frame[column],
+                                                      errors="coerce") * factor
+                per_year.append(frame)
+
+        rows = pd.concat(per_year, ignore_index=True)
+        rows = rows[WORKBOOK_COLUMNS + ADDED_COLUMNS]
+        path = directory / f"consolidated_{chemistry}.csv"
+        rows.to_csv(path, index=False)
+        note = "" if has_trajectory else "   (no trajectory -- flat in year)"
+        print(f"  {chemistry:20s} {len(rows):>7,} rows -> {path.name}{note}")
+
+    # ---------------------------------------------------------------------
+    # The two chemistries with no workbook composition. build_unknown_rows is
+    # reused rather than reimplemented: it holds every claim the templates make
+    # -- what bipolar removes, the aluminium swap and its conductance factor,
+    # the halved collectors, the structure scaling, the remainder. Repeating any
+    # of that here is how the two would drift apart.
+    #
+    # It keys on (segment, year), so each anchor is handed to it as a segment
+    # named for its capacity. That is a shim, and the 'segment' it returns is
+    # dropped again below.
+    # ---------------------------------------------------------------------
+    for chemistry in unknown:
+        capacities = pd.DataFrame([
+            {"segment": f"{int(a)}kWh", "year": y, "capacity_kwh_nominal": a,
+             # build_rows carries both through onto every row it makes. An
+             # anchor is neither fitted nor projected -- it is the workbook's
+             # own capacity -- and saying so is better than leaving them blank.
+             "capacity_is_projected": False, "capacity_source": "workbook anchor"}
+            for a in anchors for y in years])
+        if chemistry in params.technology.chemistry_energy_density:
+            capacities["pack_mass_kg_implied"] = [
+                row.capacity_kwh_nominal * 1000.0
+                / pack_density(params, chemistry, float(row.year))
+                for row in capacities.itertuples()]
+        built = build_unknown_rows(model, params, capacities, chemistry)
+
+        rows = pd.DataFrame({
+            "additionalSpecification": built.segment.map(
+                lambda s: f"BATTinELV_BEV_{s}"),
+            "Layer 1": built["layer1"],
+            "Layer 2": built["component"],
+            "Layer 4": built["element"].fillna("n/a"),
+            "parameterCode": built["level"].map(
+                {level: getattr(params.scope, attribute)
+                 for level, attribute in LEVEL_CODES.items()}),
+            "UoM": "kg",
+            "DQS": pd.NA,                      # nothing was measured, so no score
+            "productionYear": built["year"],
+            "capacity_kwh": built["capacity_kwh_nominal"],
+            "Value": built["mass_kg"],
+            "min_value": built.get("mass_p2.5"),
+            "max_value": built.get("mass_p97.5"),
+            "count_value": pd.NA,
+            "meanValue": built.get("mass_mean"),
+            "medianValue": built.get("mass_median"),
+            "modeValue": built.get("mass_mode"),
+            "STD": built.get("mass_std"),
+            "p025": built.get("mass_p2.5"),
+            "p975": built.get("mass_p97.5"),
+        })[WORKBOOK_COLUMNS + ADDED_COLUMNS]
+        path = directory / f"consolidated_{chemistry}.csv"
+        rows.to_csv(path, index=False)
+        filled = int(rows["Value"].notna().sum())
+        print(f"  {chemistry:20s} {len(rows):>7,} rows -> {path.name}"
+              f"   ({100 * filled / len(rows):.0f}% with a mass)")
+    print(f"\n  consolidated -> {params.export.consolidated_output_dir}/, "
+          "one file per chemistry with its draw arrays beside it.")
+
+    # ------------------------------------------------------------- figures
+    rows = pd.concat([pd.read_csv(p) for p in
+                      sorted((PROJECT_ROOT / params.export.composition_output_dir)
+                             .glob("composition_*.csv"))], ignore_index=True)
+    rows = rows[rows.level == "element"]
+    segment = params.export.over_time_figure_segment
+    drawn = 0
+    for chemistry in sorted(rows.chemistry.dropna().unique()):
+        figure = draw_chemistry(rows, chemistry, segment, params)
+        if figure is not None:
+            save_figure(figure, params, f"composition_over_time_{chemistry}.png")
+            drawn += 1
+    for element in params.export.crm_elements:
+        figure = draw_crm(rows, element, segment, params)
+        if figure is not None:
+            save_figure(figure, params, f"crm_over_time_{element}.png")
+            drawn += 1
+
+    capacity = params.export.distribution_figure_capacity_kwh
+    figure = draw_distribution(
+        collect_draws(model, params, capacity, None),
+        f"Whole battery mass at {capacity:.0f} kWh \u2014 every chemistry\n"
+        f"{params.monte_carlo.n_draws:,} draws; solid line the mode, dotted the "
+        "2.5 and 97.5 percentiles",
+        "battery mass in one car [kg]", params)
+    if figure is not None:
+        save_figure(figure, params, f"distribution_total_{capacity:.0f}kWh.png")
+        drawn += 1
+    for element in params.export.crm_elements:
+        figure = draw_distribution(
+            collect_draws(model, params, capacity, element),
+            f"{element} at {capacity:.0f} kWh \u2014 every chemistry that contains "
+            f"it\n{params.monte_carlo.n_draws:,} draws; solid line the mode, dotted "
+            "the 2.5 and 97.5 percentiles",
+            f"{element} in one car [kg]", params)
+        if figure is not None:
+            save_figure(figure, params, f"distribution_{element}_{capacity:.0f}kWh.png")
+            drawn += 1
+    print(f"\n  figures      -> {drawn} in {params.paths.output_dir}/")
     return 0
 
 
