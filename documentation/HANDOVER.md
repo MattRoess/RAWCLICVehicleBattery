@@ -84,7 +84,9 @@ ls data/raw/                                            # the .xlsx and the .csv
 ## 3. Where things stand
 
 Repository: <https://github.com/MattRoess/RAWCLICVehicleBattery>. Branch
-**`composition-distributions`**, three commits ahead of `main`, **not pushed**.
+**`composition-distributions`**, ahead of `main` and **not pushed**. For what is
+on it, `git log --oneline main..HEAD` — a count written here goes stale the next
+time anyone commits, as it already did once.
 
 All seven scripts run. `06` takes **5 min 15 s** at 200,000 draws — timed.
 
