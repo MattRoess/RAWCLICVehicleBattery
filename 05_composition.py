@@ -354,6 +354,49 @@ def with_pack_voltages(rows: pd.DataFrame, params) -> pd.DataFrame:
     return pd.concat(out, ignore_index=True)
 
 
+# The consolidated files carry the WORKBOOK's column names, not the internal
+# ones. Mapping rather than a second implementation: the pack rules bypassed
+# this output entirely until 2026-09-10, so solid-state's frame read 88.5 kg
+# here against 52 kg in the segment-year files -- the same drift that had hit
+# the figures earlier the same day.
+WORKBOOK_MASS_COLUMNS = {
+    "Value": "mass_kg", "min_value": "mass_min", "max_value": "mass_max",
+    "meanValue": "mass_mean", "medianValue": "mass_median",
+    "modeValue": "mass_mode", "STD": "mass_std",
+    "p025": "mass_p2.5", "p975": "mass_p97.5",
+}
+
+
+def apply_pack_rules_to_workbook(frame: pd.DataFrame, params, chemistry: str
+                                 ) -> pd.DataFrame:
+    """
+    `apply_pack_rules` on workbook-shaped rows, via a renamed view.
+
+    Layer 2 is the component, Layer 4 the element, and the level comes from the
+    parameterCode. `additionalSpecification` stands in for the segment, which is
+    what the weighting groups on -- these rows are per capacity anchor, not per
+    segment, and each anchor must be weighted on its own.
+    """
+    scope = params.scope
+    level_of = {getattr(scope, attribute): level
+                for level, attribute in LEVEL_CODES.items()}
+    present = {old: new for old, new in WORKBOOK_MASS_COLUMNS.items()
+               if old in frame.columns}
+
+    work = frame.rename(columns={"Layer 2": "component", "Layer 4": "element",
+                                 **present})
+    work["level"] = work["parameterCode"].map(level_of)
+    work["segment"] = work["additionalSpecification"]
+    work["year"] = 0                       # one anchor, one group; the real year
+                                           # is applied after, per year
+    work = apply_pack_rules(work, params, chemistry)
+
+    back = {new: old for old, new in present.items()}
+    work = work.drop(columns=["level", "segment", "year"])
+    return work.rename(columns={"component": "Layer 2", "element": "Layer 4",
+                                **back})
+
+
 def build_rows(model: CompositionModel, params, capacities: pd.DataFrame,
                chemistry: str) -> pd.DataFrame:
     """Every row of one chemistry's file."""
@@ -685,9 +728,9 @@ def build_unknown_rows(model: CompositionModel, params, capacities: pd.DataFrame
 # this file adds.
 WORKBOOK_COLUMNS = ["additionalSpecification", "Layer 1", "Layer 2", "Layer 4",
                     "parameterCode", "UoM", "DQS"]
-ADDED_COLUMNS = ["productionYear", "capacity_kwh", "Value", "min_value",
-                 "max_value", "count_value", "meanValue", "medianValue",
-                 "modeValue", "STD", "p025", "p975"]
+ADDED_COLUMNS = ["productionYear", "capacity_kwh", "voltage_v", "Value",
+                 "min_value", "max_value", "count_value", "meanValue",
+                 "medianValue", "modeValue", "STD", "p025", "p975"]
 LEVEL_CODES = {"component": "component_parameter_code",
                "material": "material_parameter_code",
                "element": "element_parameter_code"}
@@ -841,48 +884,6 @@ def draw_chemistry(rows: pd.DataFrame, chemistry: str, segment: str, params,
         axes.spines[side].set_visible(False)
     axes.legend(frameon=False, fontsize=9.5, ncol=2, loc="upper center",
                 bbox_to_anchor=(0.5, -0.09))
-    axes.set_ylim(bottom=0)
-    figure.tight_layout()
-    return figure
-
-
-
-def draw_crm(rows: pd.DataFrame, element: str, segment: str, params):
-    """One critical raw material, every chemistry, with its band."""
-    figure, axes = plt.subplots(figsize=(13, 7.5))
-    wanted = rows[(rows.element == element) & (rows.segment == segment)]
-    drawn = 0
-    for chemistry, group in wanted.groupby("chemistry"):
-        series = (group.groupby("year")[["mass_kg", "mass_p2.5", "mass_p97.5"]]
-                  .sum(min_count=1).sort_index())
-        if series.mass_kg.notna().sum() == 0:
-            continue
-        colour = params.scenarios.workbook_chemistry_colours[chemistry]
-        unknown = chemistry in UNKNOWN_COMPOSITION
-        axes.plot(series.index, series.mass_kg, label=chemistry, color=colour,
-                  linewidth=2.4, linestyle="--" if unknown else "-",
-                  marker="o", markersize=4.5)
-        if series["mass_p2.5"].notna().any():
-            axes.fill_between(series.index, series["mass_p2.5"],
-                              series["mass_p97.5"], color=colour, alpha=0.15,
-                              linewidth=0)
-        drawn += 1
-    if drawn == 0:
-        plt.close(figure)
-        return None
-
-    axes.set_xlabel("year", fontsize=11)
-    axes.set_ylabel(f"{element} in one car [kg]", fontsize=11)
-    axes.set_title(
-        f"{element} per car, segment {segment}, 2020-2070 — every chemistry\n"
-        "band is the 2.5-97.5 percentile of the Monte Carlo; dashed chemistries "
-        "have only their packaging known",
-        fontsize=12.5)
-    axes.grid(True, linestyle="--", alpha=0.3)
-    axes.set_axisbelow(True)
-    for side in ("top", "right"):
-        axes.spines[side].set_visible(False)
-    axes.legend(frameon=False, fontsize=10, ncol=2)
     axes.set_ylim(bottom=0)
     figure.tight_layout()
     return figure
@@ -1197,7 +1198,8 @@ def main(argv: list[str] | None = None) -> int:
             return improvement_factor(params, year)
         per_year = []
         for capacity in anchors:
-            at_anchor = rows_for(model, params, chemistry, capacity)
+            at_anchor = apply_pack_rules_to_workbook(
+                rows_for(model, params, chemistry, capacity), params, chemistry)
             elements, draws = model.element_draws_at(capacity, chemistry=chemistry)
             totals = draws.sum(axis=0)
             fractions = np.zeros_like(draws)
@@ -1243,7 +1245,12 @@ def main(argv: list[str] | None = None) -> int:
              # own capacity -- and saying so is better than leaving them blank.
              "capacity_is_projected": False, "capacity_source": "workbook anchor"}
             for a in anchors for y in years])
-        built = build_unknown_rows(model, params, capacities, chemistry)
+        # Through the same pack rules as everything else. Without this the
+        # consolidated files for these two chemistries would carry the
+        # unsplit enclosure, the unscaled iron and no voltage at all.
+        built = apply_pack_rules(
+            build_unknown_rows(model, params, capacities, chemistry),
+            params, chemistry)
 
         rows = pd.DataFrame({
             "additionalSpecification": built.segment.map(
@@ -1258,6 +1265,7 @@ def main(argv: list[str] | None = None) -> int:
             "DQS": pd.NA,                      # nothing was measured, so no score
             "productionYear": built["year"],
             "capacity_kwh": built["capacity_kwh_nominal"],
+            "voltage_v": built["voltage_v"],
             "Value": built["mass_kg"],
             "min_value": built.get("mass_p2.5"),
             "max_value": built.get("mass_p97.5"),
@@ -1282,7 +1290,6 @@ def main(argv: list[str] | None = None) -> int:
                       sorted((PROJECT_ROOT / params.export.composition_output_dir)
                              .glob("composition_*.csv"))], ignore_index=True)
     rows = rows[rows.level == "element"]
-    segment = params.export.over_time_figure_segment
     drawn = 0
 
     # COMPOSITION OVER TIME, AT A HELD CAPACITY. Not a segment: a segment's
@@ -1290,8 +1297,17 @@ def main(argv: list[str] | None = None) -> int:
     # the figure exists to show. One figure per chemistry per capacity.
     top_anchor = float(model.anchors.kwh.max())
     for capacity in params.export.over_time_figure_capacities_kwh:
+        # Above the workbook's top anchor, only the chemistries that plausibly
+        # reach that size. Everything else would be a figure of an extrapolation
+        # of a pack nobody would build.
+        large = float(capacity) > params.export.over_time_large_capacity_above_kwh
+        eligible = ([(c, u) for c, u in to_write
+                     if c in params.export.over_time_large_capacity_chemistries]
+                    if large else to_write)
+        if not eligible:
+            continue
         held_rows = []
-        for chemistry, unknown in to_write:
+        for chemistry, unknown in eligible:
             built = fixed_capacity_rows(model, params, chemistry, float(capacity),
                                          unknown)
             # ONE voltage only. The rows carry both, and stacking both would
@@ -1313,11 +1329,6 @@ def main(argv: list[str] | None = None) -> int:
                  f"  ⚠️ EXTRAPOLATED, {float(capacity) / top_anchor:.1f}x the top "
                  f"anchor ({top_anchor:.0f} kWh)"))
 
-    for element in params.export.crm_elements:
-        figure = draw_crm(rows, element, segment, params)
-        if figure is not None:
-            save_figure(figure, params, f"crm_over_time_{element}.png")
-            drawn += 1
 
     capacity = params.export.distribution_figure_capacity_kwh
 

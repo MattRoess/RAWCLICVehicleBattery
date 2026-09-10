@@ -791,11 +791,18 @@ class ExportParams:
     # SAFE TO CHANGE: yes, to any element the workbook resolves.
     # Carbon is deliberately NOT here: graphite is on the EU list, but it is the
     # anode's bulk material rather than a scarcity question in this model.
+    # Which elements get their own DISTRIBUTION figure. No longer an
+    # over-time figure: material demand over time needs vehicle counts and
+    # lifetimes, which live in RAWCLICStockAndFlow -- this project answers what
+    # is in one battery, not how much the fleet needs.
     crm_elements: tuple[str, ...] = ("Li", "Co", "Ni", "Mn", "Cu", "Si")
 
     # Which segment the over-time figures (07) draw. One segment, because these
     # are full-size single-element figures rather than a grid nobody can read.
     # SAFE TO CHANGE: yes, to any segment the composition files contain.
+    # ⚠️ NO LONGER USED BY THE OVER-TIME FIGURES, which hold capacity constant
+    # (see over_time_figure_capacities_kwh). Kept only because other scripts
+    # still name a segment.
     over_time_figure_segment: str = "JC"
 
     # ⚠️ THE COMPOSITION-OVER-TIME FIGURES HOLD CAPACITY CONSTANT. One figure
@@ -820,6 +827,15 @@ class ExportParams:
     # stacking both would draw every element twice.
     # SAFE TO CHANGE: yes, to any value in technology.pack_voltages_v.
     over_time_figure_voltage_v: int = 400
+
+    # ⚠️ WHO GETS THE BIG CAPACITY. 200 kWh is twice the workbook's top anchor
+    # and not every chemistry is a plausible candidate for a pack that size --
+    # LMFP is, on its voltage plateau and its cost. Capacities above
+    # `over_time_large_capacity_above_kwh` are drawn ONLY for the chemistries
+    # named here; everything else gets the smaller capacities only.
+    # SAFE TO CHANGE: yes -- empty means nobody gets the large ones.
+    over_time_large_capacity_chemistries: tuple[str, ...] = ("battLiMFP_subsub",)
+    over_time_large_capacity_above_kwh: float = 100.0
 
     # Which capacity anchor the distribution figures (08) draw, in kWh. Must be
     # one of the workbook's own anchors -- the per-draw arrays exist only there.
