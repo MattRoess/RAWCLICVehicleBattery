@@ -695,65 +695,6 @@ class ScenarioParams:
     scenario_figure_size_in: tuple[float, float] = (16.0, 9.0)
 
 
-@dataclass
-class SecondLifeParams:
-    """
-    What happens between a battery leaving the car and reaching the recycler.
-
-    This is the only part of the scenario work that touches the OUTFLOW, and it
-    is where the scenarios actually differ for a recycling model. A chemistry's
-    share of new sales in 2050 says nothing about 2050's recovered material: the
-    packs arriving then were sold around 2035, and the ones that went to
-    stationary storage first arrive later still, or not at all within the horizon.
-    """
-
-    # Turn the whole second-life delay off to see the mix that would return if
-    # every pack went straight from the car to the recycler.
-    # SAFE TO CHANGE: yes.
-    enabled: bool = True
-
-    # Years from sale to the car being scrapped. The stock-and-flow model has a
-    # proper distribution of lifetimes; this is a single figure, enough to place
-    # the return mix within a year or two, and not a substitute for it.
-    # SAFE TO CHANGE: yes.
-    vehicle_lifetime_years: int = 15
-
-    # HOW MUCH LONGER A SECOND-LIFE PACK LIVES, in years, before it reaches the
-    # recycler. Given as a range because it is one: 15 to 20 more years is the
-    # working assumption, and the two ends are carried through as a band rather
-    # than averaged away.
-    # SAFE TO CHANGE: yes.
-    second_life_extra_years_min: int = 15
-    second_life_extra_years_max: int = 20
-
-    # ⚠️ THE FRACTION OF PACKS THAT GO TO SECOND LIFE AT ALL, per chemistry --
-    # NOT all of them. LFP is highest: it is the chemistry stationary storage
-    # actually wants, being cheap, long-cycling and thermally forgiving, and it
-    # is worth least as scrap, so the pull is strong at both ends. NMC is worth
-    # more to a recycler than to a storage operator, so less of it is diverted.
-    # A chemistry absent from this map is never diverted.
-    # SAFE TO CHANGE: yes -- this is a genuine unknown and the single parameter
-    # most worth varying. Everything from 0 to ~0.6 for LFP is arguable.
-    second_life_share: dict[str, float] = field(default_factory=lambda: {
-        "LFP": 0.35,
-        "LMFP": 0.30,
-        "Na_ion": 0.25,
-        "NMC_high": 0.10,
-        "NMC_middle": 0.10,
-        "NCA": 0.05,
-        "solid_state": 0.15,
-    })
-
-    # Packs that are lost, exported or otherwise never reach a European
-    # recycler, as a fraction of what leaves the fleet. Applied evenly across
-    # chemistries: nothing suggests it is chemistry-specific, and pretending to
-    # know that it is would be worse than saying so here.
-    # SAFE TO CHANGE: yes.
-    unrecovered_share: float = 0.0
-
-    # SAFE TO CHANGE: yes. Keep the .png suffix.
-    returning_mix_file_name: str = "chemistry_returning_for_recycling.png"
-
 
 @dataclass
 class ExportParams:
@@ -1284,7 +1225,7 @@ class Params:
 
     SECTIONS = ("paths", "scope", "drawing", "interpolation", "monte_carlo", "capacity_figure",
                 "ev_details", "scenarios",
-                "second_life", "technology", "export")
+                "technology", "export")
 
     paths: PathParams = field(default_factory=PathParams)
     scope: ScopeParams = field(default_factory=ScopeParams)
@@ -1294,7 +1235,6 @@ class Params:
     capacity_figure: CapacityFigureParams = field(default_factory=CapacityFigureParams)
     ev_details: EVDetailsParams = field(default_factory=EVDetailsParams)
     scenarios: ScenarioParams = field(default_factory=ScenarioParams)
-    second_life: SecondLifeParams = field(default_factory=SecondLifeParams)
     technology: TechnologyParams = field(default_factory=TechnologyParams)
     export: ExportParams = field(default_factory=ExportParams)
 
@@ -1589,38 +1529,6 @@ class Params:
                         f"of that group's market and are far from 100 at {far_off}. "
                         "Small drift is normalised away; this is too big to be a "
                         "rounding slip.")
-        sl = self.second_life
-        if sl.vehicle_lifetime_years < 1:
-            raise ParameterError(
-                f"second_life.vehicle_lifetime_years must be at least 1: "
-                f"{sl.vehicle_lifetime_years}")
-        if sl.second_life_extra_years_min > sl.second_life_extra_years_max:
-            raise ParameterError(
-                f"second_life.second_life_extra_years_min "
-                f"({sl.second_life_extra_years_min}) is above the max "
-                f"({sl.second_life_extra_years_max}).")
-        if sl.second_life_extra_years_min < 0:
-            raise ParameterError(
-                "second_life.second_life_extra_years_min cannot be negative: "
-                f"{sl.second_life_extra_years_min}")
-        bad_shares = {name: value for name, value in sl.second_life_share.items()
-                      if not 0 <= value <= 1}
-        if bad_shares:
-            raise ParameterError(
-                f"second_life.second_life_share values are fractions and must be in "
-                f"[0, 1]: {bad_shares}")
-        unknown = sorted(set(sl.second_life_share) - set(sc.scenario_colours))
-        if unknown:
-            raise ParameterError(
-                f"second_life.second_life_share names chemistries that appear in no "
-                f"scenario: {unknown}")
-        if not 0 <= sl.unrecovered_share < 1:
-            raise ParameterError(
-                f"second_life.unrecovered_share must be in [0, 1): {sl.unrecovered_share}")
-        if not sl.returning_mix_file_name.endswith(".png"):
-            raise ParameterError(
-                "second_life.returning_mix_file_name must end in '.png': "
-                f"{sl.returning_mix_file_name!r}")
 
         tech = self.technology
         if tech.range_saturation_km <= 0:
