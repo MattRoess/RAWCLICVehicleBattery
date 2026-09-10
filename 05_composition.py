@@ -68,6 +68,50 @@ LAST_OBSERVED_YEAR = 2026
 UNKNOWN_MATERIAL = "unknownBatteryMaterial"
 
 
+_IMPROVEMENT_DRAWS: np.ndarray | None = None
+
+
+def improvement_draws(params) -> np.ndarray:
+    """
+    One drawn 2070 improvement per Monte Carlo draw, shape (n_draws,).
+
+    ⚠️ DRAWN ONCE AND CACHED. This is a single uncertainty about the
+    technology, not an independent error per component: the same draw has to
+    mean the same improvement everywhere, or summing rows would cancel it and
+    the total would come out falsely certain. Same reasoning as the workbook's
+    own factor_draws.
+    """
+    global _IMPROVEMENT_DRAWS
+    if _IMPROVEMENT_DRAWS is not None:
+        return _IMPROVEMENT_DRAWS
+    band = params.technology.mass_improvement_2070
+    mc = params.monte_carlo
+    rng = np.random.default_rng(mc.random_seed + 1)      # +1: not the workbook's stream
+    _IMPROVEMENT_DRAWS = rng.triangular(
+        float(band["min"]), float(band["mode"]), float(band["max"]), size=mc.n_draws)
+    return _IMPROVEMENT_DRAWS
+
+
+def improvement_share(params, year: float) -> float:
+    """How far along the improvement a year is: 0 at the start, 1 at the end."""
+    tech = params.technology
+    first, last = float(tech.improvement_from_year), float(tech.improvement_to_year)
+    return float(np.clip((float(year) - first) / (last - first), 0.0, 1.0))
+
+
+def improvement_factor(params, year: float) -> float:
+    """Central mass multiplier for a year -- the mode of the distribution."""
+    return 1.0 - improvement_share(params, year) * float(
+        params.technology.mass_improvement_2070["mode"])
+
+
+def improvement_factor_draws(params, year: float) -> np.ndarray | None:
+    """Per-draw mass multiplier for a year, or None when the MC is off."""
+    if not params.monte_carlo.enabled:
+        return None
+    return 1.0 - improvement_share(params, year) * improvement_draws(params)
+
+
 def capacity_growth_factor(params, segment: str, year: float, base_year: float) -> float:
     """
     Multiplier on a PROJECTED capacity under the grow_* scenarios.
@@ -161,6 +205,155 @@ def segment_capacities(params, ev: EVDetails, segments: list[str]) -> pd.DataFra
     return pd.DataFrame(rows)
 
 
+def scale_element_masses(rows: pd.DataFrame, by_component: dict, mass_columns) -> None:
+    """
+    Multiply one element's mass inside one component, IN PLACE, and carry the
+    change up to that component's own rows.
+
+    The component and material rows have no element, so an element-keyed factor
+    misses them entirely -- which is how currentCollectorAnode once read 29.7 kg
+    at component level against 14.2 kg summed over its elements. They take the
+    mass-weighted factor of the element rows beneath them instead.
+    """
+    element_level = rows.level == "element"
+    for component, by_element in by_component.items():
+        at_component = rows.component == component
+        parts = rows.loc[at_component & element_level]
+        if parts.empty:
+            continue
+        weighted = {}
+        for key, group in parts.groupby(["segment", "year"], dropna=False):
+            total = pd.to_numeric(group.mass_kg, errors="coerce").sum()
+            if not total:
+                continue
+            moved = sum(pd.to_numeric(
+                group.loc[group.element == element, "mass_kg"], errors="coerce").sum()
+                for element in by_element)
+            scaled = sum(pd.to_numeric(
+                group.loc[group.element == element, "mass_kg"], errors="coerce").sum()
+                * factor for element, factor in by_element.items())
+            weighted[key] = (scaled + (total - moved)) / total
+
+        for element, factor in by_element.items():
+            target = at_component & (rows.element == element)
+            for column in mass_columns:
+                rows.loc[target, column] = pd.to_numeric(
+                    rows.loc[target, column], errors="coerce") * factor
+
+        if weighted:
+            whole = at_component & ~element_level
+            factors = pd.MultiIndex.from_frame(
+                rows.loc[whole, ["segment", "year"]]).map(weighted).to_numpy()
+            for column in mass_columns:
+                rows.loc[whole, column] = pd.to_numeric(
+                    rows.loc[whole, column], errors="coerce") * factors
+
+
+def split_module_enclosure(rows: pd.DataFrame, params) -> pd.DataFrame:
+    """
+    Re-split the module enclosure's element rows, leaving its total alone.
+
+    The workbook files the whole enclosure as iron. Module housings and coolant
+    manifolds are part aluminium, so the mass is redistributed across the
+    elements in `technology.module_enclosure_split`. The component's own mass
+    does not move -- only its makeup, which is the part the stock-and-flow
+    model consumes.
+    """
+    split = params.technology.module_enclosure_split
+    component = "batteryPackModuleEnclosuresAndCoolantManifolds"
+    mass_columns = [c for c in rows.columns
+                    if c.startswith("mass_") or c == "kg_per_kwh"]
+    source = rows[(rows.component == component) & (rows.level == "element")]
+    if source.empty or not split:
+        return rows
+
+    keep = rows.drop(index=source.index)
+    pieces = []
+    for element, share in split.items():
+        piece = source.copy()
+        # Every element row of the component is pooled and re-divided, so the
+        # split holds whatever the workbook happened to file it under.
+        for column in mass_columns:
+            piece[column] = pd.to_numeric(piece[column], errors="coerce") * float(share)
+        piece["element"] = element
+        pieces.append(piece)
+    out = pd.concat([keep] + pieces, ignore_index=True)
+    return out.groupby(
+        [c for c in out.columns if c not in mass_columns],
+        dropna=False, as_index=False, sort=False)[mass_columns].sum()
+
+
+def cell_mass_ratio(params, chemistry: str) -> float:
+    """
+    Cell mass of this chemistry against the reference, at any capacity.
+
+    Capacity cancels: cells = kWh / (Wh/kg), so the ratio is just the inverse
+    ratio of the two cell energy densities. Both are taken in the base year, so
+    the structure ratio is a property of the chemistry and does not drift as
+    the cells improve -- the improvement already shrinks the whole pack through
+    density_factor, and applying it twice would double-count it.
+    """
+    tech = params.technology
+    reference = tech.structure_reference_chemistry
+    densities = tech.chemistry_energy_density
+    if chemistry not in densities or reference not in densities:
+        return 1.0
+    here = float(densities[chemistry]["wh_per_kg"][0])
+    there = float(densities[reference]["wh_per_kg"][0])
+    if not here:
+        return 1.0
+    return there / here
+
+
+def scale_structure(rows: pd.DataFrame, params, chemistry: str) -> pd.DataFrame:
+    """
+    Scale the pack IRON by the mass of cells it carries. Aluminium is untouched.
+
+    The frame and the module box hold the cells up; a lighter cell stack needs
+    less of them. The heat exchanger does not follow weight -- the heat to be
+    moved is set by the capacity -- so its aluminium is deliberately excluded,
+    including the aluminium half of the module enclosure.
+    """
+    tech = params.technology
+    if not tech.structure_scales_with_cell_mass:
+        return rows
+    factor = cell_mass_ratio(params, chemistry)
+    if factor == 1.0:
+        return rows
+    mass_columns = [c for c in rows.columns
+                    if c.startswith("mass_") or c == "kg_per_kwh"]
+    scale_element_masses(
+        rows, {component: {"Fe": factor} for component in tech.structure_iron_components},
+        mass_columns)
+    return rows
+
+
+def with_pack_voltages(rows: pd.DataFrame, params) -> pd.DataFrame:
+    """
+    One copy of every row per pack voltage, tagged in `voltage_v`.
+
+    The same power at double the voltage is half the current, so the conductors
+    sized by current carry half the copper. Nothing else in the pack knows the
+    voltage: the frame, the heat exchanger and the cell materials are untouched.
+    """
+    tech = params.technology
+    mass_columns = [c for c in rows.columns
+                    if c.startswith("mass_") or c == "kg_per_kwh"]
+    out = []
+    for voltage in tech.pack_voltages_v:
+        factor = float(tech.copper_scale_by_voltage[voltage])
+        copy = rows.copy()
+        if factor != 1.0:
+            scale_element_masses(
+                copy,
+                {component: {"Cu": factor}
+                 for component in tech.voltage_scaled_copper_components},
+                mass_columns)
+        copy["voltage_v"] = voltage
+        out.append(copy)
+    return pd.concat(out, ignore_index=True)
+
+
 def build_rows(model: CompositionModel, params, capacities: pd.DataFrame,
                chemistry: str) -> pd.DataFrame:
     """Every row of one chemistry's file."""
@@ -168,25 +361,26 @@ def build_rows(model: CompositionModel, params, capacities: pd.DataFrame,
     frames = []
     for entry in capacities.itertuples():
         for level in export.export_levels:
-            table = model.weights_at(entry.capacity_kwh_nominal, chemistry=chemistry,
-                                     level=level)
+            # THE CELLS IMPROVE, SO THE MASS FALLS -- AND BY HOW MUCH IS NOT
+            # KNOWN. The workbook's composition is true in
+            # technology.improvement_from_year; in any later year the same kWh
+            # needs less cell, and less pack hardware around a smaller stack.
+            #
+            # The improvement is passed as DRAWS, not as a scalar, so the band
+            # widens with it instead of merely sliding down: by 2070 the mass
+            # is 70% to 85% of the base year, most likely 80%. Handed to
+            # weights_at so it multiplies the draws BEFORE any percentile is
+            # taken -- scaling a percentile afterwards would keep the band the
+            # width it had with the improvement treated as certain.
+            table = model.weights_at(
+                entry.capacity_kwh_nominal, chemistry=chemistry, level=level,
+                year_factor=improvement_factor(params, float(entry.year)),
+                year_factor_draws=improvement_factor_draws(params, float(entry.year)))
             table.insert(0, "level", level)
             table.insert(0, "year", entry.year)
             table.insert(0, "segment", entry.segment)
             table["capacity_is_projected"] = entry.capacity_is_projected
             table["capacity_source"] = entry.capacity_source
-            # THE CELLS IMPROVE, SO THE MASS FALLS. The workbook's composition is
-            # true in export.density_base_year; in any other year the same kWh
-            # needs less cell, and less pack hardware around a smaller stack.
-            # Applied HERE as well as in 09 because these two files are the same
-            # claim in two shapes -- without it 09 had nickel falling 23% by 2050
-            # while these said it never moved, and the figures drawn from these
-            # showed a flat line that was simply wrong.
-            factor = density_factor(params, chemistry, float(entry.year))
-            if factor != 1.0:
-                for column in [c for c in table.columns
-                               if c.startswith("mass_") or c == "kg_per_kwh"]:
-                    table[column] = table[column] * factor
             frames.append(table)
 
     rows = pd.concat(frames, ignore_index=True)
@@ -332,7 +526,11 @@ def density_factor(params, chemistry: str, year: float) -> float:
     1/1.3 = 0.77 of the material for the same energy. Chemistries with no
     trajectory return 1.0 and are untouched.
 
-    Shared by 06 and 09 so the two cannot disagree about the same quantity.
+    ⚠️ NO LONGER SCALES MASS. The mass improvement is a DRAWN quantity now --
+    see improvement_factor / improvement_factor_draws -- because how much
+    lighter a cell gets by 2070 is not known to three figures. This is kept
+    only for pack_density's range-target arithmetic, which needs the
+    trajectory itself rather than a mass multiplier.
     """
     if chemistry not in params.technology.chemistry_energy_density:
         return 1.0
@@ -543,7 +741,47 @@ def rows_for(model: CompositionModel, params, chemistry: str, capacity: float
 
 
 
-def draw_chemistry(rows: pd.DataFrame, chemistry: str, segment: str, params):
+def apply_pack_rules(rows: pd.DataFrame, params, chemistry: str) -> pd.DataFrame:
+    """
+    The three pack-level rules, in the one order that is correct.
+
+    Split the enclosure FIRST, so only its iron half is available to scale;
+    scale the iron by the cell mass it carries; then expand to the pack
+    voltages, which only touches copper. Called by the export AND by the
+    figures -- they drifted apart once already, with the files carrying rules
+    the figures never saw.
+    """
+    rows = split_module_enclosure(rows, params)
+    rows = scale_structure(rows, params, chemistry)
+    return with_pack_voltages(rows, params)
+
+
+def fixed_capacity_rows(model: CompositionModel, params, chemistry: str,
+                        capacity: float, unknown: bool) -> pd.DataFrame:
+    """
+    Every element at ONE capacity, across the export years.
+
+    The improvement, isolated. Capacity is held, so the only thing that moves
+    with the year is density_factor -- the same kWh needing less material as
+    the cell gets better. A segment's capacity trajectory is a different
+    question and belongs to the stock-and-flow path, not to this figure.
+
+    Built through build_rows / build_unknown_rows rather than a second copy of
+    the arithmetic, so the figure and the exported files can never disagree.
+    """
+    held = pd.DataFrame({
+        "segment": f"{capacity:.0f}kWh",
+        "year": list(params.export_years()),
+        "capacity_kwh_nominal": float(capacity),
+        "capacity_is_projected": False,
+        "capacity_source": "held_constant",
+    })
+    builder = build_unknown_rows if unknown else build_rows
+    return apply_pack_rules(builder(model, params, held, chemistry), params, chemistry)
+
+
+def draw_chemistry(rows: pd.DataFrame, chemistry: str, segment: str, params,
+                   top_anchor_kwh: float = 100.0):
     """Every element of one chemistry, stacked, across the years."""
     wanted = rows[(rows.chemistry == chemistry) & (rows.segment == segment)
                   & (rows.element != UNKNOWN_MATERIAL)]
@@ -577,12 +815,25 @@ def draw_chemistry(rows: pd.DataFrame, chemistry: str, segment: str, params):
     unknown = chemistry in UNKNOWN_COMPOSITION
     axes.set_xlabel("year", fontsize=11)
     axes.set_ylabel("mass in one car [kg]", fontsize=11)
+    # 'segment' carries the capacity label for the held-capacity figures. Above
+    # the workbook's top anchor every mass is extrapolated and the title has to
+    # say so -- 200 kWh is twice the highest capacity the workbook measures.
+    held = str(segment).endswith("kWh")
+    where = f"at {segment}, held constant" if held else f"segment {segment}"
+    beyond = ""
+    if held:
+        value = float(str(segment)[:-3])
+        top = float(top_anchor_kwh)
+        if value > top:
+            beyond = (f"\n⚠️ EXTRAPOLATED: {value:.0f} kWh is {value / top:.1f}x the "
+                      f"workbook's top anchor ({top:.0f} kWh); no measurement supports it")
     axes.set_title(
-        f"{chemistry} — every element, segment {segment}, 2020-2070"
+        f"{chemistry} — every element, {where}, 2020-2070"
         + ("\nPACKAGING ONLY: the cathode, anode and electrolyte are not known "
            "for this chemistry" if unknown else
-           f"\ntotal falls {100 * (1 - total.iloc[-1] / total.max()):.0f}% from its "
-           "peak as the cells improve"),
+           f"\ntotal falls {100 * (1 - total.iloc[-1] / total.max()):.0f}% as the "
+           "cells improve — same kWh, less material")
+        + beyond,
         fontsize=12.5)
     axes.grid(True, linestyle="--", alpha=0.3)
     axes.set_axisbelow(True)
@@ -851,6 +1102,9 @@ def main(argv: list[str] | None = None) -> int:
                       f"{today:.0f} kg)" if today else "")
         rows = (build_unknown_rows(model, params, chemistry_capacities, chemistry) if unknown
                 else build_rows(model, params, chemistry_capacities, chemistry))
+        # 400 V and 800 V side by side, tagged in voltage_v. Doubles the rows,
+        # not the files: the consumer filters instead of choosing a file.
+        rows = apply_pack_rules(rows, params, chemistry)
         name = f"composition_{chemistry}.{export.export_format}"
         path = params.composition_output_path(PROJECT_ROOT, name)
         if export.export_format == "csv":
@@ -936,11 +1190,11 @@ def main(argv: list[str] | None = None) -> int:
 
     for chemistry in known:
         has_trajectory = chemistry in params.technology.chemistry_energy_density
-        # density_factor, not a second copy of the arithmetic: 06 and
-        # 09 disagreeing about this exact quantity is what made every figure
-        # flat after 2025.
+        # improvement_factor, the SAME function the segment-year files use, not
+        # a second copy of the arithmetic: these two outputs disagreeing about
+        # this exact quantity is what made every figure flat after 2025.
         def factor_for(year: float) -> float:
-            return density_factor(params, chemistry, year)
+            return improvement_factor(params, year)
         per_year = []
         for capacity in anchors:
             at_anchor = rows_for(model, params, chemistry, capacity)
@@ -1030,11 +1284,35 @@ def main(argv: list[str] | None = None) -> int:
     rows = rows[rows.level == "element"]
     segment = params.export.over_time_figure_segment
     drawn = 0
-    for chemistry in sorted(rows.chemistry.dropna().unique()):
-        figure = draw_chemistry(rows, chemistry, segment, params)
-        if figure is not None:
-            save_figure(figure, params, f"composition_over_time_{chemistry}.png")
-            drawn += 1
+
+    # COMPOSITION OVER TIME, AT A HELD CAPACITY. Not a segment: a segment's
+    # capacity moves, and that trend would be drawn on top of the improvement
+    # the figure exists to show. One figure per chemistry per capacity.
+    top_anchor = float(model.anchors.kwh.max())
+    for capacity in params.export.over_time_figure_capacities_kwh:
+        held_rows = []
+        for chemistry, unknown in to_write:
+            built = fixed_capacity_rows(model, params, chemistry, float(capacity),
+                                         unknown)
+            # ONE voltage only. The rows carry both, and stacking both would
+            # draw every element twice.
+            at_voltage = built.voltage_v == params.export.over_time_figure_voltage_v
+            held_rows.append(built[(built.level == "element") & at_voltage])
+        held = pd.concat(held_rows, ignore_index=True)
+        label = f"{float(capacity):.0f}kWh"
+        for chemistry in sorted(held.chemistry.dropna().unique()):
+            figure = draw_chemistry(held, chemistry, label, params,
+                                    top_anchor_kwh=top_anchor)
+            if figure is not None:
+                save_figure(figure, params,
+                            f"composition_over_time_{chemistry}_{label}.png")
+                drawn += 1
+        print(f"  composition over time at {label}: capacity held, only the "
+              "cell improvement moves"
+              + ("" if float(capacity) <= top_anchor else
+                 f"  ⚠️ EXTRAPOLATED, {float(capacity) / top_anchor:.1f}x the top "
+                 f"anchor ({top_anchor:.0f} kWh)"))
+
     for element in params.export.crm_elements:
         figure = draw_crm(rows, element, segment, params)
         if figure is not None:

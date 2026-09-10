@@ -798,6 +798,29 @@ class ExportParams:
     # SAFE TO CHANGE: yes, to any segment the composition files contain.
     over_time_figure_segment: str = "JC"
 
+    # ⚠️ THE COMPOSITION-OVER-TIME FIGURES HOLD CAPACITY CONSTANT. One figure
+    # per chemistry per capacity, showing the IMPROVEMENT alone: the same kWh
+    # needing less material as the cells get better. Nothing else in the
+    # composition depends on the year, so the curve is density_factor and
+    # nothing more.
+    #
+    # They used to follow a segment instead, and a segment's capacity moves:
+    # JC ran 65 -> 76 kWh, so the mass ROSE to 2025 before falling, mixing a
+    # capacity trend into a figure meant to show improvement. That trend belongs
+    # to the stock-and-flow path, not here.
+    #
+    # ⚠️ 80 kWh is one of the workbook's own anchors (25/45/60/80/100) and is
+    # exact. 200 kWh is DOUBLE the top anchor -- every mass at it is
+    # extrapolated, and the figure says so in its title.
+    # SAFE TO CHANGE: yes, but a value above 100 is extrapolation, and
+    # interpolation.max_capacity_kwh is the hard ceiling.
+    over_time_figure_capacities_kwh: tuple[float, ...] = (80.0, 200.0)
+
+    # Which pack voltage the over-time figures draw. The rows carry both, and
+    # stacking both would draw every element twice.
+    # SAFE TO CHANGE: yes, to any value in technology.pack_voltages_v.
+    over_time_figure_voltage_v: int = 400
+
     # Which capacity anchor the distribution figures (08) draw, in kWh. Must be
     # one of the workbook's own anchors -- the per-draw arrays exist only there.
     # SAFE TO CHANGE: yes, to another anchor.
@@ -812,8 +835,13 @@ class ExportParams:
     # The year the energy-density trajectories are measured AT. Masses in every
     # other year are scaled by density(this year) / density(that year), so this
     # is the year in which the workbook's composition is taken to be true.
+    # ⚠️ 2020, because that is where the improvement is measured FROM. The
+    # trajectories run 2020 -> 2070 in one straight line, so the mass falls
+    # steadily across the whole period instead of dropping fast and then going
+    # flat: the old shape reached its full -23% by 2050 and did nothing for the
+    # last twenty years, which nothing supports.
     # SAFE TO CHANGE: yes, but it shifts every year's mass, not just one.
-    density_base_year: int = 2025
+    density_base_year: int = 2020
 
     export_levels: tuple[str, ...] = ("component", "material", "element")
 
@@ -964,9 +992,14 @@ class ExportParams:
             # coolant manifolds at 75 kWh, on top of the separator, the liquid
             # electrolyte and the per-cell terminals a bipolar stack also does
             # without.
+            # ⚠️ Module enclosures and coolant manifolds are PACK hardware, not
+            # cell packaging -- the same box the frame bolts into, whatever is
+            # inside it. They were grouped with the cell packaging by mistake,
+            # which left solid-state the only one of the nine chemistries
+            # without them and made the shared parts non-comparable at equal
+            # capacity.
             "remove_components": ("batteryCellSeparator", "batteryCellElectrolyte",
-                                  "batteryPackCellTerminals", "batteryCellCasing",
-                                  "batteryPackModuleEnclosuresAndCoolantManifolds"),
+                                  "batteryPackCellTerminals", "batteryCellCasing"),
             "element_swaps": {},
             # The collectors ARE claimed, at NMC_highNi's aluminium cathode side and
             # COPPER anode side, because the copper is the number that is wanted: if
@@ -983,13 +1016,15 @@ class ExportParams:
             # Packaging only. At 75 kWh this fills 57.5% of the pack -- higher than
             # sodium's 46.7%, because bipolar construction has already removed the
             # separator, the electrolyte and the per-cell terminals.
-                        # The chemistry-independent pack components that survive bipolar
-            # construction -- there is NO cell packaging: no casing, no
-            # separator, no per-cell terminals, no module enclosures -- plus the
-            # current collectors, halved for the shared bipolar plate.
+            # The chemistry-independent pack components, which are IDENTICAL to
+            # every other chemistry at the same capacity -- frame, thermal
+            # conductor, cables and module enclosures -- plus the current
+            # collectors, halved for the shared bipolar plate. There is no CELL
+            # packaging: no casing, no separator, no per-cell terminals.
             "claim_masses_for": ("currentCollectorAnode", "currentCollectorCathode",
                                  "batteryPackCables", "batteryPackSupportFrame",
-                                 "batteryPackThermalConductor"),
+                                 "batteryPackThermalConductor",
+                                 "batteryPackModuleEnclosuresAndCoolantManifolds"),
             # ONE CLAD Al-Cu PLATE, reported as its two faces. A bipolar cell has
             # no separate anode and cathode collector: it has a single plate,
             # copper on the face towards the anode and aluminium on the face
@@ -1056,6 +1091,107 @@ class TechnologyParams:
     # SAFE TO CHANGE: yes. Off means every chemistry keeps the segment capacity
     # from 03, which is the conservative assumption.
     apply_range_saturation: bool = True
+
+    # ⚠️ 400 V AND 800 V, IN THE SAME FILE. Every row is written twice, once per
+    # pack voltage, tagged in a `voltage_v` column. The same power at double the
+    # voltage is half the current, so the conductors carry half the copper --
+    # cables and the copper in the cell terminals. Nothing else changes: the
+    # frame, the heat exchanger and the cell materials do not know the voltage.
+    #
+    # Two rows rather than two files because the stock-and-flow model already
+    # interpolates these files over capacity; a column it can filter on costs it
+    # nothing, a doubled file set costs it a lookup rule.
+    # SAFE TO CHANGE: yes -- drop to one voltage by leaving one entry.
+    pack_voltages_v: tuple[int, ...] = (400, 800)
+
+    # ⚠️ THE MODULE ENCLOSURE IS A MIXTURE. The workbook files all 34.6 kg of it
+    # (at 80 kWh) as iron, but module housings and coolant manifolds are part
+    # aluminium. Split half and half. The component's total mass does not
+    # change -- only which elements it is made of, which is what the
+    # stock-and-flow model actually consumes.
+    #
+    # The two halves then follow the two rules the rest of the pack follows:
+    # the iron is structure and scales with the weight it carries, the
+    # aluminium is heat exchanger and is fixed at a given capacity.
+    # SAFE TO CHANGE: yes -- the split is a judgement, not a measurement.
+    module_enclosure_split: dict[str, float] = field(default_factory=lambda: {
+        "Fe": 0.5,
+        "Al": 0.5,
+    })
+
+    # ⚠️ THE STRUCTURE FOLLOWS THE WEIGHT IT CARRIES. The workbook gives every
+    # chemistry the SAME iron at a given capacity, which cannot be right: at
+    # 80 kWh that is 123 kg of frame and module box around 343 kg of LFP cells
+    # but also around 200 kg of solid-state cells, a structure-to-cell ratio of
+    # 0.52 against 0.88. A box does not weigh as much as what is inside it.
+    #
+    # The iron is therefore scaled by the mass of cells it actually supports:
+    # cells(this chemistry) / cells(the reference), at the same capacity, where
+    # cell mass is capacity divided by that chemistry's cell energy density.
+    # The ALUMINIUM is not scaled -- it is the heat exchanger, and the heat to
+    # be moved is set by the capacity, not by the pack's weight.
+    # SAFE TO CHANGE: yes -- off leaves every chemistry the workbook's iron.
+    # ⚠️ HOW MUCH LIGHTER THE SAME kWh GETS BY 2070, AS A DISTRIBUTION. The
+    # improvement is not a known number, so it is drawn rather than asserted:
+    # triangular, 15% at worst, 20% most likely, 30% at best, reached in 2070
+    # and interpolated linearly from zero in 2020.
+    #
+    # This is drawn ONCE per Monte Carlo draw and reused across every component,
+    # every element and every year, because it is ONE uncertainty about the
+    # technology -- not an independent error per row. Drawing it per row would
+    # cancel it out in any sum, which is exactly the wrong answer.
+    #
+    # It multiplies the composition draws, so it WIDENS every band in every
+    # output file. The mode reproduces the old fixed 20%.
+    # SAFE TO CHANGE: yes -- min <= mode <= max, all in [0, 1).
+    mass_improvement_2070: dict[str, float] = field(default_factory=lambda: {
+        "min": 0.15,
+        "mode": 0.20,
+        "max": 0.30,
+    })
+
+    # The year the improvement is measured FROM (zero improvement) and the year
+    # it reaches the value above.
+    # SAFE TO CHANGE: yes.
+    improvement_from_year: int = 2020
+    improvement_to_year: int = 2070
+
+    structure_scales_with_cell_mass: bool = True
+
+    # ⚠️ THE REFERENCE SETS THE LEVEL FOR EVERYONE. Its own iron is unchanged
+    # and every other chemistry moves relative to it, so a denser reference
+    # makes the whole fleet heavier and a less dense one makes it lighter.
+    # SAFE TO CHANGE: yes, and it is worth arguing about.
+    structure_reference_chemistry: str = "battLiFP_subsub"
+
+    # The components whose IRON is scaled: the frame and the module box. Not
+    # the cables, not the terminals, not the heat exchanger.
+    # SAFE TO CHANGE: yes.
+    structure_iron_components: tuple[str, ...] = (
+        "batteryPackSupportFrame",
+        "batteryPackModuleEnclosuresAndCoolantManifolds")
+
+    # Copper multiplier per voltage, against the workbook's own composition,
+    # which is a 400 V pack.
+    #
+    # ⚠️ A THIRD OFF, NOT A HALF. Halving the current would halve the conductor
+    # cross-section if cross-section were the only thing setting it, but a
+    # busbar is also sized by mechanical handling, connector geometry and the
+    # minimum gauge a crimp will take, none of which follow the current down.
+    # A third is the reduction actually claimed for 800 V packs.
+    # SAFE TO CHANGE: yes.
+    copper_scale_by_voltage: dict[int, float] = field(default_factory=lambda: {
+        400: 1.0,
+        800: 2.0 / 3.0,
+    })
+
+    # Which components' COPPER the voltage scales. Only the conductors sized by
+    # current: the pack cables and the copper in the cell terminals. The anode
+    # current collector is sized by the cell, not by the pack bus, and is left
+    # alone.
+    # SAFE TO CHANGE: yes.
+    voltage_scaled_copper_components: tuple[str, ...] = (
+        "batteryPackCables", "batteryPackCellTerminals")
 
     # The range a car is built for once density stops binding, in km, on the
     # real-world consumption in EV_details.csv.
@@ -1161,8 +1297,8 @@ class TechnologyParams:
         # results from 2030, as soon as the scenarios put it on the road.
         "solid_state": {
             "basis": "cell",
-            "years": (2030, 2040, 2050, 2060, 2070),
-            "wh_per_kg": (400.0, 500.0, 600.0, 700.0, 800.0),
+            "years": (2020, 2070),
+            "wh_per_kg": (400.0, 500.0),
         },
         # THE SEVEN LITHIUM CHEMISTRIES. Until 2026-09-10 they had no trajectory
         # at all, so their kg/kWh was frozen forever and a 2070 NMC pack held
@@ -1183,20 +1319,20 @@ class TechnologyParams:
         # Going further needs a lithium-metal anode, which is not this chemistry
         # any more -- it is solid_state, tracked separately. After 2050 the gains
         # come from SWITCHING chemistry, not from improving the old one.
-        "battLiFP_subsub":   {"basis": "cell", "years": (2025, 2050, 2070),
-                              "wh_per_kg": (233.0, 303.0, 303.0)},
-        "battLiMO_subsub":   {"basis": "cell", "years": (2025, 2050, 2070),
-                              "wh_per_kg": (231.0, 300.0, 300.0)},
-        "battLiMFP_subsub":  {"basis": "cell", "years": (2025, 2050, 2070),
-                              "wh_per_kg": (270.0, 351.0, 351.0)},
-        "battLiNMC_lowNi":   {"basis": "cell", "years": (2025, 2050, 2070),
-                              "wh_per_kg": (285.0, 371.0, 371.0)},
-        "battLiNCA_subsub":  {"basis": "cell", "years": (2025, 2050, 2070),
-                              "wh_per_kg": (306.0, 398.0, 398.0)},
-        "battLiNMC_midNi":   {"basis": "cell", "years": (2025, 2050, 2070),
-                              "wh_per_kg": (311.0, 404.0, 404.0)},
-        "battLiNMC_highNi":  {"basis": "cell", "years": (2025, 2050, 2070),
-                              "wh_per_kg": (339.0, 441.0, 441.0)},
+        "battLiFP_subsub":   {"basis": "cell", "years": (2020, 2070),
+                              "wh_per_kg": (233.0, 291.2)},
+        "battLiMO_subsub":   {"basis": "cell", "years": (2020, 2070),
+                              "wh_per_kg": (231.0, 288.8)},
+        "battLiMFP_subsub":  {"basis": "cell", "years": (2020, 2070),
+                              "wh_per_kg": (270.0, 337.5)},
+        "battLiNMC_lowNi":   {"basis": "cell", "years": (2020, 2070),
+                              "wh_per_kg": (285.0, 356.2)},
+        "battLiNCA_subsub":  {"basis": "cell", "years": (2020, 2070),
+                              "wh_per_kg": (306.0, 382.5)},
+        "battLiNMC_midNi":   {"basis": "cell", "years": (2020, 2070),
+                              "wh_per_kg": (311.0, 388.8)},
+        "battLiNMC_highNi":  {"basis": "cell", "years": (2020, 2070),
+                              "wh_per_kg": (339.0, 423.8)},
 
         # Sodium improves too, and treating it as static was wrong: without a
         # trajectory it had no pack mass, so its unknown active material could
@@ -1207,8 +1343,8 @@ class TechnologyParams:
         # add later years here if that is wrong.
         "Na_ion": {
             "basis": "cell",
-            "years": (2030, 2040, 2050),
-            "wh_per_kg": (160.0, 200.0, 220.0),
+            "years": (2020, 2070),
+            "wh_per_kg": (200.0, 250.0),
         },
     })
 
@@ -1582,6 +1718,20 @@ class Params:
                         "rounding slip.")
 
         tech = self.technology
+        improvement = tech.mass_improvement_2070
+        missing = sorted({"min", "mode", "max"} - set(improvement))
+        if missing:
+            raise ParameterError(
+                f"technology.mass_improvement_2070 needs {missing}.")
+        low, mode, high = (float(improvement[k]) for k in ("min", "mode", "max"))
+        if not 0.0 <= low <= mode <= high < 1.0:
+            raise ParameterError(
+                "technology.mass_improvement_2070 must satisfy "
+                f"0 <= min <= mode <= max < 1: {low}, {mode}, {high}")
+        if tech.improvement_to_year <= tech.improvement_from_year:
+            raise ParameterError(
+                f"technology.improvement_to_year ({tech.improvement_to_year}) must be "
+                f"after improvement_from_year ({tech.improvement_from_year}).")
         if tech.range_saturation_km <= 0:
             raise ParameterError(
                 f"technology.range_saturation_km must be positive: "

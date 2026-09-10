@@ -476,7 +476,9 @@ class CompositionModel:
         return elements, np.vstack(rows)
 
     def weights_at(self, capacity_kwh: float, *, chemistry: str,
-                   level: str = "component", aggregate_elements: bool = False) -> pd.DataFrame:
+                   level: str = "component", aggregate_elements: bool = False,
+                   year_factor_draws: np.ndarray | None = None,
+                   year_factor: float = 1.0) -> pd.DataFrame:
         """
         What a battery of `capacity_kwh` is made of.
 
@@ -523,6 +525,17 @@ class CompositionModel:
 
         draws = self.mass_draws_at(capacity_kwh)[wanted.to_numpy()]
         central = self.central_mass(capacity_kwh)[wanted.to_numpy(), 0]
+
+        # THE YEAR'S IMPROVEMENT, FOLDED IN BEFORE ANY PERCENTILE IS TAKEN.
+        # It is one uncertainty about the technology, shared by every row and
+        # every element, so it must multiply the DRAWS: applied to a percentile
+        # afterwards it would scale the band without widening it, and applied
+        # per row it would cancel in any sum. `year_factor` is its central
+        # value, used for mass_kg.
+        if year_factor_draws is not None:
+            draws = draws * np.asarray(year_factor_draws)[None, :]
+        if year_factor != 1.0:
+            central = central * float(year_factor)
 
         out = keys[wanted].reset_index(drop=True).copy()
         out["capacity_kwh"] = float(capacity_kwh)
