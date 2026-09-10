@@ -197,7 +197,8 @@ def cell_mass_ratio(params, chemistry: str) -> float:
     ratio of the two cell energy densities. Both are taken in the base year, so
     the structure ratio is a property of the chemistry and does not drift as
     the cells improve -- the improvement already shrinks the whole pack through
-    density_factor, and applying it twice would double-count it.
+    the improvement already shrinks the whole pack, and applying it twice
+    would double-count it.
     """
     tech = params.technology
     reference = tech.structure_reference_chemistry
@@ -616,7 +617,7 @@ def fixed_capacity_rows(model: CompositionModel, params, chemistry: str,
     Every element at ONE capacity, across the export years.
 
     The improvement, isolated. Capacity is held, so the only thing that moves
-    with the year is density_factor -- the same kWh needing less material as
+    with the year is the improvement -- the same kWh needing less material as
     the cell gets better. A segment's capacity trajectory is a different
     question and belongs to the stock-and-flow path, not to this figure.
 
