@@ -157,6 +157,19 @@ now carry a mass; the rest is labelled `unknownBatteryMaterial`.
 `composition_status` separates `packaging_from_base`, `unknown_remainder` and
 `unknown`.
 
+**A trap worth knowing about.** The density trajectory was once applied in `09`
+but not in `06`, so the two deliverables disagreed about the same quantity —
+nickel fell 23% in one and never moved in the other — and every figure, which
+reads `06`, showed a flat line that was simply wrong. They now share
+`density_factor()` in `06`. **If you add another consumer, use that helper.**
+
+**What the distributions say, and it is the useful result.** Comparing
+chemistries at the same quantity: lithium spans 6.55–9.90 kg across chemistries
+against 1.24 kg of uncertainty within one, nickel 27.2–58.5 against 7.2, copper
+33.4–46.4 against 4.0. **Which chemistry wins matters 3–4× more than the
+composition uncertainty**, which says the effort belongs on the chemistry-share
+scenarios rather than on tightening the composition data.
+
 ---
 
 ## 4. What was decided today, and what it rests on
@@ -180,10 +193,21 @@ now carry a mass; the rest is labelled `unknownBatteryMaterial`.
 | Seven lithium chemistries | today's measured density, **+30% by 2050**, flat after | +30% supplied. Flat is a **ceiling argument**: +30% puts NMC high-Ni at 441 Wh/kg cell and liquid electrolyte with graphite or silicon runs out near 400–450. Past that is a lithium-metal anode, which is `solid_state`, not this chemistry |
 | Which lithium densities | **measured**, not the supplied 330/235 | measurement gives 339 and 233, within 3%. Used so the trajectory and the composition cannot contradict each other — a trajectory of 330 against a composition implying 339 makes the implied pack mass disagree with the sum of its own parts |
 | **battLiMFP pinned at 270 Wh/kg**, composition rescaled | +24.6% material | see below |
+| **battLiMFP lithium corrected to stoichiometry** | 3.45% → **4.40%** of cathode | its SECOND defect, see below |
 | The year now moves the mass | Ni in an 80 kWh NMC high-Ni pack: **58.5 kg (2025) → 45.0 (2050)**, −23.1% | the density gain expressed as mass. Uniform across components, which is an assumption: cables scale with current rather than energy and are understated late |
 
-**The LMFP correction, because it is the one number here that overrides the
-source.** The workbook implies 336 Wh/kg, which makes LMFP *lighter per kWh than
+**Two LMFP corrections, the only numbers here that override the source.** Both
+are in parameters rather than the workbook, so a WP3 revision removes them.
+
+*Its lithium.* Lithium as a share of cathode active material lands on the
+compound's own arithmetic for every chemistry — LFP 4.59% against 4.40% for
+LiFePO₄, the three NMCs 7.29–7.37% against 7.19%, NCA 7.40% — except LMFP at
+3.45%, 22% short. It cannot be the exception: LiMnₓFe₁₋ₓPO₄ carries the same
+lithium per formula unit as LiFePO₄, and manganese (54.94) and iron (55.85)
+weigh almost the same. Pinned at 4.40% via
+`technology.element_share_of_component_override`.
+
+*Its energy density.* The workbook implies 336 Wh/kg, which makes LMFP *lighter per kWh than
 NMC mid-Ni* — 2.947 against 3.179 kg/kWh. It cannot be: LMFP is LFP with
 manganese substituted in, and its advantage is a higher voltage plateau, not a
 nickel-cobalt cathode. Two further signs it is a rescaled LFP rather than a
@@ -218,12 +242,18 @@ and reaches 2.68 by 2060.
 
 ## 5. Open
 
-0. **THE FIGURES ARE REJECTED.** Matthias, 2026-09-10: "I want different figures.
-   The current figures. I do not like at all." What specifically is wrong was not
-   established before the session ended. `07` (one element, all chemistries, over
-   time) and `08` (ridgeline distributions per chemistry) exist and run, but do
-   not redo them without asking what he wants instead — guessing will waste
-   another pass.
+0. **The figures were rejected and rebuilt.** Settled 2026-09-10. `07` now draws
+   all elements in one stacked figure per chemistry, plus one figure per critical
+   raw material across every chemistry; `08` draws one figure per material with
+   every chemistry's distribution overlaid in absolute kg. Two constraints he
+   stated and neither should be undone: **no log scales**, and **no small
+   figures** — so no facet grids, one subject per full-size figure.
+
+   Uncertainty on the stacked figure is on the TOTAL only. That is a real limit,
+   not laziness: iron is 600× lithium, so on one linear axis a per-element band
+   for lithium is thinner than its own line. Per-element bands are on the CRM
+   figures. If per-element uncertainty is wanted per chemistry, the only honest
+   way on a linear axis is two figures split by magnitude — offered, not taken.
 
 1. **The active materials for sodium and solid-state.** Still the only real gap.
    Cathode, anode and electrolyte are `unknownBatteryMaterial`. **Both** now have
