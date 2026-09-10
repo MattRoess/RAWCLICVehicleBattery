@@ -675,6 +675,27 @@ class ScenarioParams:
     # Colour per chemistry across the scenario figures. LFP/NCA/NMC match the
     # ev_details colours so the observed and projected figures read together.
     # SAFE TO CHANGE: yes -- presentation only.
+    # One colour per WORKBOOK CHEMISTRY, for the composition figures (07, 08).
+    # NOTE the name: ev_details.chemistry_colours is a DIFFERENT map, keyed by
+    # market chemistry (LFP, NCA, NMC_middle, NMC_high) for figure 04. These are
+    # keyed by the workbook's own Layer 1 names.
+    # Separate from scenario_colours below, which colours the seven SCENARIO
+    # chemistries: those group battLiMFP with battLiMO, and battLiNMC_midNi with
+    # battLiNMC_lowNi, so reusing them drew two pairs of lines in one colour and
+    # made them impossible to tell apart.
+    # SAFE TO CHANGE: yes. Every chemistry in the workbook needs an entry.
+    workbook_chemistry_colours: dict[str, str] = field(default_factory=lambda: {
+        "battLiFP_subsub": "#2f8f5b",     # LFP, green
+        "battLiMFP_subsub": "#7fbf7b",    # LMFP, lighter green
+        "battLiMO_subsub": "#1b7837",     # LMO, darker green
+        "battLiNCA_subsub": "#b07aa1",    # NCA, mauve
+        "battLiNMC_highNi": "#1f5f8b",    # blue
+        "battLiNMC_midNi": "#e08214",     # orange
+        "battLiNMC_lowNi": "#8c3d04",     # darker brown-orange
+        "Na_ion": "#d9a441",              # sand
+        "solid_state": "#6a51a3",         # violet
+    })
+
     scenario_colours: dict[str, str] = field(default_factory=lambda: {
         "LFP": "#2f8f5b", "LMFP": "#7fbf7b", "NMC_high": "#1f5f8b",
         "NMC_middle": "#e08214", "NCA": "#b07aa1",
@@ -801,6 +822,16 @@ class ExportParams:
     # pack mass. The files carry both levels precisely so that gap is visible
     # rather than inferred.
     # SAFE TO CHANGE: yes.
+    # Which segment the over-time figures (07) draw. One segment, because these
+    # are full-size single-element figures rather than a grid nobody can read.
+    # SAFE TO CHANGE: yes, to any segment the composition files contain.
+    over_time_figure_segment: str = "JC"
+
+    # Which capacity anchor the distribution figures (08) draw, in kWh. Must be
+    # one of the workbook's own anchors -- the per-draw arrays exist only there.
+    # SAFE TO CHANGE: yes, to another anchor.
+    distribution_figure_capacity_kwh: float = 80.0
+
     export_levels: tuple[str, ...] = ("component", "material", "element")
 
     # Include the Monte Carlo percentile columns.
@@ -921,9 +952,17 @@ class ExportParams:
             # must not be scaled by a copper-to-aluminium factor.
             "mass_scale": {"currentCollectorAnode": {"Cu": 0.4764},
                            "batteryPackCellTerminals": {"Cu": 0.4764}},
-            # Sodium has no density trajectory, so there is no second pack density
-            # to scale the structure against, and none is invented.
-            "scale_structure_with_density": False,
+            # Sodium now HAS a density trajectory, so the same rule applies as for
+            # solid-state: the structure follows the size of the pack it holds.
+            # For sodium the factor is usually ABOVE 1 -- x1.46 at 75 kWh in 2030 --
+            # because a sodium pack storing the same energy is physically bigger
+            # than LFP's, so it needs more frame, not less.
+            # Measured: with this off the remainder swung from 67.9% to 55.8% of
+            # pack mass between 2030 and 2050 purely because the structure was
+            # frozen at LFP's while the pack mass moved. With it on the remainder
+            # holds at 53.3%, which is what should happen when only the cells
+            # improve.
+            "scale_structure_with_density": True,
             "note": ("packaging assumed from LFP -- casing, separator, terminals, "
                      "collectors and pack hardware carry LFP's masses; Al replaces Cu "
                      "as the anode current collector, its mass scaled by 0.4764 for "
@@ -1074,10 +1113,28 @@ class TechnologyParams:
     # SAFE TO CHANGE: yes. Say which basis you are using -- it is the single
     # easiest thing to get wrong here.
     chemistry_energy_density: dict[str, dict] = field(default_factory=lambda: {
+        # 400 Wh/kg is where solid-state cells ARE, not where they arrive in 2040.
+        # The old trajectory started at 400 in 2040 and so built in a decade of no
+        # progress, and held flat from 2060. Revised 2026-09-10: today's 400
+        # doubling to 800 by 2070, on a straight line.
+        # This also brings the chemistry forward by ten years -- it now affects
+        # results from 2030, as soon as the scenarios put it on the road.
         "solid_state": {
             "basis": "cell",
-            "years": (2040, 2050, 2060, 2070),
-            "wh_per_kg": (400.0, 500.0, 600.0, 600.0),
+            "years": (2030, 2040, 2050, 2060, 2070),
+            "wh_per_kg": (400.0, 500.0, 600.0, 700.0, 800.0),
+        },
+        # Sodium improves too, and treating it as static was wrong: without a
+        # trajectory it had no pack mass, so its unknown active material could
+        # carry no number at all while solid-state's could.
+        # Supplied 2026-09-10, at CELL level.
+        # Held flat after 2050 -- np.interp does not extrapolate, so 2060 and
+        # 2070 stay at 220. That is an assumption of stagnation, not a forecast;
+        # add later years here if that is wrong.
+        "Na_ion": {
+            "basis": "cell",
+            "years": (2030, 2040, 2050),
+            "wh_per_kg": (160.0, 200.0, 220.0),
         },
     })
 
@@ -1091,6 +1148,15 @@ class TechnologyParams:
     # 0.47x to 0.57x of today.
     cell_to_pack_ratio: dict[str, float] = field(default_factory=lambda: {
         "solid_state": 0.85,
+        # MEASURED, not chosen: this is LFP's own ratio in the workbook, which is
+        # where sodium's packaging comes from. Sodium is a conventional format
+        # with a normal casing, so it has no reason to beat LFP.
+        # It is an approximation, because the real ratio moves with capacity --
+        # LFP is 0.567 at 45 kWh, 0.650 at 75 and 0.687 at 100, since the pack
+        # hardware does not scale with the cells. 0.650 is the middle of the
+        # range this project exports.
+        # SAFE TO CHANGE: yes, and worth about 25% of pack mass at the extremes.
+        "Na_ion": 0.650,
     })
 
     # Real-world consumption per segment, Wh/km, used to turn a range target
