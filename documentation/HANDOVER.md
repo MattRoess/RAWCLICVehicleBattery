@@ -1,58 +1,50 @@
 # Handover — RAWCLICVehicleBattery
 
-Written 2026-09-10, superseding the 09-09 version. State verified against the repository and against runs made
-today, not remembered.
+Written 2026-09-10, superseding the earlier 09-10 version. For resuming on the
+**office Mac on Monday 2026-09-14**.
 
-For the methods and the reasoning, read [`METHODOLOGY.md`](METHODOLOGY.md). This
-file is only what you need to carry on.
+State verified against the repository and against runs made today, not
+remembered. For the methods and the reasoning, read
+[`METHODOLOGY.md`](METHODOLOGY.md).
 
-**Read §1 before trusting the previous handover.** Several of its claims were
-wrong, and that is the most useful thing this document has to say.
-
----
-
-## 1. The previous handover was wrong about the blocker
-
-It said `RAWCLICStockAndFlow/code/04_04_batteries.py` was blocked for three
-reasons. All three were checked against the actual files on 2026-09-09 and none
-of them held:
-
-| its claim | what is actually true |
-|---|---|
-| `parameterCode = "e-m"` does not exist in the workbook | it exists — **3,289 rows**, the largest of the three codes |
-| no sheet `BATT_EV_consolidated_inputForRM`, no `Layer 3` column | both exist, in sheet 1 of 4 |
-| `BATTKey_xEV_shares_final.xlsx` is not on disk | it is, in `Empa/RAWCLIC/_vehicles/dataStockFlow/` |
-
-The mistake was comparing that script against **this** project's
-`BATT_consolidated_composition.xlsx`. It does not read that file. It reads
-`250318_WP3_MS23_consolidatedComposition_BATT_EV_v7_editable.xlsx`, an older WP3
-workbook with a different shape. Both inputs have since been copied into
-`RAWCLICStockAndFlow/data/raw/` and the loader runs.
-
-The lesson generalises: **verify a handover's claims before repeating them**,
-including this one's.
-
-Two things settled while looking, worth keeping:
-
-- The undocumented `÷1000` in `04_04` is a **kg→tonne** conversion, not the
-  g→kg its comment guesses. Every workbook row is `kg/kWh` and `amount` is in
-  millions of vehicles, so the output is tonnes and that file's `"Mass [kg]"`
-  axis label is wrong by 1000×.
-- `04_03` and `04_04` hardcode their scenario lists while `04_01` uses
-  `active_scenario_names()`. Since `scenarios_to_run = ("BAU",)`, both demand
-  trackers that were deliberately never generated. **That work is Matthias's own
-  — do not take it up unless he asks.**
+**Read §0 first.** It is how to work on this project, and it cost the most to
+learn.
 
 ---
 
-## 2. Picking up on another Mac
+## 0. How to work on this, and what went wrong today
+
+Three separate times today a narrow instruction was read as authorisation for a
+broad change, and the work had to be reverted. The pattern was always the same:
+Matthias points at **one** thing, the assistant comes back with a **bigger**
+thing. Sodium's capacity became a proposal to change the range-saturation gate,
+which became an argument to replace the whole fitted-curve basis, which became
+an unasked rewrite of `segment_capacities`.
+
+The rules that follow are his, stated repeatedly, and they are not negotiable:
+
+- **Ask before every change. Propose and wait.** "Implement it" answers *whether*,
+  not *which* — if two options were on the table and he has not named one, the
+  choice is still his.
+- **He runs the long jobs.** "I always told you that long reruns are up to me."
+  Never run the pipeline against `data/` or `figures/` unasked. Test in a
+  sandbox — see §2.
+- **Do not widen the scope.** If he narrows, narrow with him. An adjacent defect
+  you notice is a thing to *report*, not to fix.
+- **Never claim an unmeasured number.** A claim that a rerun changes nothing must
+  be verified before it is made, not after. That specific mistake was made today.
+- **He decides what is useful.** Not the assistant.
+
+---
+
+## 1. Picking up on the office Mac
 
 The project lives in iCloud Drive, so the whole folder syncs, `data/` and
 `figures/` included. Neither is in git.
 
 ```bash
 cd "/Users/rm/Documents/GitHub/RAWCLICVehicleBattery"   # == the iCloud path
-git pull
+git pull                                                # branch composition-distributions
 ls data/raw/                                            # the .xlsx and the .csv
 ./.venv/bin/python 00_parameters.py
 ```
@@ -65,212 +57,283 @@ ls data/raw/                                            # the .xlsx and the .csv
    ~/.pyenv/versions/3.14.4/bin/python3 -m venv .venv
    ./.venv/bin/pip install -r requirements.txt
    ```
-3. **`params.xlsx`, `data/composition/` and `figures/` are generated.** Rerun;
-   nothing is lost.
+3. **`params.xlsx`, `data/composition/`, `data/consolidated/` and `figures/` are
+   generated.** Rerun; nothing is lost.
 
 > **A warning paid for in lost time.** iCloud syncs `.venv` — 386 MB of
-> `site-packages`, pandas' own compiled test bytecode included — one small file
-> at a time. While that runs, **every git command touching the index or the
-> object store hangs indefinitely** in any repo under `Documents/`. It looks
-> like a broken repository and is not. Wait for `brctl status` to go quiet.
+> `site-packages` — one small file at a time. While that runs, **every git
+> command touching the index or the object store hangs indefinitely** in any repo
+> under `Documents/`. It looks like a broken repository and is not. Wait for
+> `brctl status` to go quiet.
 >
-> Do **not** try to fix this by renaming `.venv` to `.venv.nosync`. That was
-> tried today, it does stop the sync, and it was reverted on instruction: it
-> leaves conflict folders behind and iCloud can propagate the exclusion to the
-> other Mac as a deletion. Leave the venvs alone.
+> Do **not** rename `.venv` to `.venv.nosync`. It was tried, it does stop the
+> sync, and it was reverted on instruction: it leaves conflict folders behind and
+> iCloud can propagate the exclusion to the other Mac as a deletion. **Leave the
+> venvs alone.**
+
+---
+
+## 2. Running it
+
+```bash
+./.venv/bin/python 00_parameters.py                 # always first, validates 125 settings
+./.venv/bin/python 99_check_environment.py
+./.venv/bin/python 01_draw_battery_structure.py
+./.venv/bin/python 02_composition_by_capacity.py
+./.venv/bin/python 03_capacity_by_chemistry.py
+./.venv/bin/python 04_chemistry_scenarios.py
+./.venv/bin/python 05_composition.py                # THE DELIVERABLE, and every figure
+```
+
+**`05_composition.py` is the one that matters.** It writes the segment-year
+files, the consolidated files, the per-draw arrays and all 32 figures.
+
+**Its runtime at 200,000 draws has not been timed.** The last measured figure
+(5 min 15 s) was for the pre-merge `03` and does not carry over — `05` now does
+strictly more work. Do not quote a number until someone times it.
+
+### Testing without touching `data/`
+
+Never smoke-test against the real output directories. The harness used today is
+in the session scratchpad and is three lines of principle:
+
+```python
+import src.params_schema as ps
+_real = ps.current
+def patched():
+    p = _real()
+    p.monte_carlo.n_draws = 2000                     # shape, not precision
+    p.export.composition_output_dir  = OUT + "/composition"
+    p.export.consolidated_output_dir = OUT + "/consolidated"
+    p.paths.output_dir               = OUT + "/figures"
+    return p
+ps.current = patched
+```
+
+Then `importlib.import_module('05_composition').main([])`. Verified today: exit
+0, 9 composition CSVs (80,256 rows across both voltages), 9 consolidated files
+(15,840 rows), 70 draw arrays, 32 figures.
 
 ---
 
 ## 3. Where things stand
 
 Repository: <https://github.com/MattRoess/RAWCLICVehicleBattery>. Branch
-**`composition-distributions`**, ahead of `main` and **pushed**. For what is on
-it, `git log --oneline main..HEAD` — a count written here goes stale the next
-time anyone commits, as it already did once.
+**`composition-distributions`**, 18 commits ahead of `main`, **pushed**. For
+what is on it: `git log --oneline main..HEAD` — a count written here goes stale.
 
-All seven scripts run. `03` takes **5 min 15 s** at 200,000 draws — timed.
+Today's three commits, newest first:
 
-```bash
-./.venv/bin/python 00_parameters.py                 # always first
-./.venv/bin/python 99_check_environment.py
-./.venv/bin/python 01_draw_battery_structure.py
-./.venv/bin/python 02_composition_by_capacity.py
-./.venv/bin/python 03_capacity_by_chemistry.py
-./.venv/bin/python 04_chemistry_scenarios.py
-./.venv/bin/python 05_composition.py   # THE DELIVERABLE, and every figure
-```
+| commit | what |
+|---|---|
+| `534e5a0` | composition at held capacity; improvement drawn, not asserted; structure follows weight; 400/800 V |
+| `892df4e` | capacity scenarios `saturate` / `grow_low` / `grow_high`, A–D only |
+| `1f693c9` | sodium/solid-state claims, shared-parts distribution, component `mass_scale` fix |
 
-**`05_composition.py` is the one to hand on.** It writes `data/consolidated/`, one file per
-chemistry in the INPUT WORKBOOK'S OWN SCHEMA, expanded — which is what the rest
-of RAWCLIC expects and what the earlier bespoke shape was not:
+### The composition figures answer a different question now
 
-```
-additionalSpecification | Layer 1 | Layer 2 | Layer 4 | parameterCode | UoM | DQS
-productionYear | capacity_kwh | Value | min_value | max_value | count_value
-meanValue | medianValue | modeValue | STD | p025 | p975
-```
+They used to follow segment JC, whose capacity runs 65 → 76 kWh, so the mass
+**rose** to 2025 before falling — a capacity trend drawn on top of the
+improvement the figure exists to show. They now **hold capacity constant**, at
+80 kWh and 200 kWh, and the only thing moving with the year is the cell getting
+better. LFP at 80 kWh: 464 → 372 kg, a straight line.
 
-Nothing in it is invented: every `Layer 1`, `Layer 2` and `Layer 4` is the
-workbook's own, and `DQS`/`count_value` are carried through, not recomputed.
-Added are the year, the anchor capacity, kg instead of kg/kWh, and the six
-statistics named as `RAWCLICVehicleElectronics` names them. 9 files, 16,005 rows,
-with the per-draw arrays beside them — the distribution next to the value.
+The segment capacity trajectory belongs to the stock-and-flow path, which
+interpolates these files over capacity. `export.over_time_figure_capacities_kwh`
+controls which capacities are drawn; `over_time_figure_voltage_v` picks the
+voltage (drawing both would stack every element twice).
 
-`03` still writes the segment-year files; they were kept deliberately.
+**200 kWh is twice the workbook's top anchor.** Every mass at it is
+extrapolated, and the figure title and the run log both say so.
 
-### What changed today
+### The improvement is a distribution, not a number
 
-**Every mass now carries its whole distribution, not just a band.** Eleven
-columns, matching what `RAWCLICVehicleElectronics` writes: `mass_kg`,
-`mass_mode`, `mass_median`, `mass_mean`, `mass_std`, `mass_min`, `mass_max`,
-`mass_p2.5`, `mass_p25`, `mass_p75`, `mass_p97.5`. All from the same draw array,
-never from the percentiles — the element aggregation sums on draws because a
-percentile of a sum is not the sum of percentiles.
+How much lighter the same kWh gets by 2070 is not known to three figures, so it
+is drawn: **triangular, min 15%, mode 20%, max 30%**, interpolated linearly from
+zero in 2020. `technology.mass_improvement_2070`.
 
-**`n_draws` is 200,000**, matching that model's `N_SIMULATIONS`. Measured: the
-mean and the 2.5/97.5 percentiles move only ~0.1% between 20,000 and 200,000,
-so the bands were already settled. The **mode** is why — it is a histogram peak,
-and against the triangular's known mode of 1.0 it tightens from 1.57% worst case
-to 0.44%.
+> **It is drawn ONCE per Monte Carlo draw and shared by every component, element
+> and year.** It is one uncertainty about the technology, not an independent
+> error per row. Drawn per row it would cancel in any sum and the total would
+> come out falsely certain — the same reasoning as the workbook's own
+> `factor_draws`.
 
-**The draws themselves are persisted** as element fractions, at the workbook's
-five capacity anchors per chemistry, in `data/composition/element_draws/` —
-`float32 (draws × elements) .npy` beside an `elements.txt`, the electronics
-layout. 70 files, 328 MB. Stock-and-flow multiplies element data against its own
-per-draw vehicle counts, draw against draw, which no percentile supports.
+It is handed to `weights_at()` so it multiplies the **draws**, before any
+percentile is taken. Applied to a percentile afterwards it would slide the band
+without widening it. Measured on LFP at 80 kWh: the band grows from **15.5%** of
+the central in 2020 to **21.6%** in 2070, and the central falls exactly 20.0%.
 
-> **The consumer must interpolate, and above 100 kWh extrapolate.** The fitted
-> capacities land between anchors (JC 76.3) and past the top one (JE 104.5, F
-> 106.1). Checked on `battLiNMC_midNi`: linear interpolation is within **0.51%**
-> and linear extrapolation within **0.41%**. **Only that one chemistry was
-> checked, and nothing above 106 kWh.** Fractions are strongly capacity-dependent
-> — they shift 21–60% relative across 25→100 kWh, because pack hardware does not
-> scale with kWh while cell materials do. One array per chemistry would have been
-> wrong by up to 60%.
+> **`density_factor()` no longer scales mass.** It survives only for the
+> range-target arithmetic. The 2070 endpoints in
+> `technology.chemistry_energy_density` are now **decorative for mass** — change
+> one and the other will not follow. This is a trap; the docstring says so.
 
-**Sodium and solid-state have packaging masses.** 72.0% and 75.0% of their rows
-now carry a mass; the rest is labelled `unknownBatteryMaterial`.
-`composition_status` separates `packaging_from_base`, `unknown_remainder` and
-`unknown`.
+### The structure follows the weight it carries
 
-**A trap worth knowing about.** The density trajectory was once applied in `03`
-but not in `03`, so the two deliverables disagreed about the same quantity —
-nickel fell 23% in one and never moved in the other — and every figure, which
-reads `03`, showed a flat line that was simply wrong. They now share
-`density_factor()` in `03`. **If you add another consumer, use that helper.**
+The workbook gives every chemistry the **same** iron at a given capacity. That
+put 123 kg of frame and module box around 343 kg of LFP cells but also around
+200 kg of solid-state cells — a structure-to-cell ratio of 0.52 against **0.88**,
+a box weighing nearly as much as its contents.
 
-**What the distributions say, and it is the useful result.** Comparing
-chemistries at the same quantity: lithium spans 6.55–9.90 kg across chemistries
-against 1.24 kg of uncertainty within one, nickel 27.2–58.5 against 7.2, copper
-33.4–46.4 against 4.0. **Which chemistry wins matters 3–4× more than the
-composition uncertainty**, which says the effort belongs on the chemistry-share
-scenarios rather than on tightening the composition data.
+The iron is now scaled by the cell mass it supports, against the reference. The
+ratio is **0.31 for all nine**.
 
----
+> **`technology.structure_reference_chemistry` sets the level for everyone.** It
+> is LFP. Its own iron is unchanged and every other chemistry moves relative to
+> it, so a denser reference makes the whole fleet heavier. Using the codebase's
+> other `reference_chemistry` (NMC high-Ni) would make every chemistry ~45%
+> heavier in iron. **Worth arguing about.**
 
-## 4. What was decided today, and what it rests on
+Aluminium is deliberately **excluded** from the scaling, including the
+enclosure's aluminium half: the heat to be moved is set by the capacity, not by
+the pack's weight.
 
-| decision | value | note |
-|---|---|---|
-| Sodium anode collector and cell terminals | **Al**, mass × **0.4764** | density AND conductivity: (59.6/37.7) × (2.70/8.96). Equal conductance is an **assumption** |
-| Sodium pack copper | **12.12 kg**, cables only | was 45.07 kg; the anode collector alone was 27.56 of it |
-| Solid-state is bipolar | no cell casing, no module enclosures | one package for the whole battery, not one per cell — **38.2 kg** at 75 kWh, on top of separator, electrolyte and per-cell terminals |
-| Solid-state collectors | **halved** | the bipolar plate is shared: cathode collector of one cell, anode collector of the next |
-| Solid-state collectors stay **copper** | 21.46 kg at 75 kWh | claimed deliberately, because the copper is the number wanted. **Treat as an upper bound** — a solid-state cell may need no copper substrate at all |
-| Solid-state structure | scales by base Wh/kg ÷ solid-state Wh/kg | **the correction that makes it work**, see below |
+### 400 V and 800 V, in one file
 
-### Added 2026-09-10
+A `voltage_v` column, values 400 and 800. Same power at double the voltage is
+less current and less conductor: **a third off** the copper in the cables and
+the cell terminals — not a half, because a busbar is also sized by handling,
+connector geometry and minimum crimp gauge.
 
-| decision | value | note |
-|---|---|---|
-| **Every** chemistry now has a density trajectory | — | before today only solid-state had one, so seven of nine never improved: a 2070 NMC pack held exactly a 2030 pack's materials |
-| Sodium | **160 / 200 / 220** Wh/kg cell at 2030/2040/2050, flat after | supplied. Cell-to-pack **0.650**, measured as LFP's own, since sodium's packaging comes from LFP |
-| Solid-state, revised | **400** in 2030 → **800** in 2070 | 400 is where cells ARE, not where they arrive. The old curve started at 400 in 2040 and so built in a decade of no progress |
-| Seven lithium chemistries | today's measured density, **+30% by 2050**, flat after | +30% supplied. Flat is a **ceiling argument**: +30% puts NMC high-Ni at 441 Wh/kg cell and liquid electrolyte with graphite or silicon runs out near 400–450. Past that is a lithium-metal anode, which is `solid_state`, not this chemistry |
-| Which lithium densities | **measured**, not the supplied 330/235 | measurement gives 339 and 233, within 3%. Used so the trajectory and the composition cannot contradict each other — a trajectory of 330 against a composition implying 339 makes the implied pack mass disagree with the sum of its own parts |
-| **battLiMFP pinned at 270 Wh/kg**, composition rescaled | +24.6% material | see below |
-| **battLiMFP lithium corrected to stoichiometry** | 3.45% → **4.40%** of cathode | its SECOND defect, see below |
-| The year now moves the mass | Ni in an 80 kWh NMC high-Ni pack: **58.5 kg (2025) → 45.0 (2050)**, −23.1% | the density gain expressed as mass. Uniform across components, which is an assumption: cables scale with current rather than energy and are understated late |
+The **anode current collector is untouched**: it is sized by the cell, not by
+the pack bus.
 
-**Two LMFP corrections, the only numbers here that override the source.** Both
-are in parameters rather than the workbook, so a WP3 revision removes them.
+Two rows rather than two files because the stock-and-flow model already
+interpolates these files over capacity; a column it can filter on costs it
+nothing.
 
-*Its lithium.* Lithium as a share of cathode active material lands on the
-compound's own arithmetic for every chemistry — LFP 4.59% against 4.40% for
-LiFePO₄, the three NMCs 7.29–7.37% against 7.19%, NCA 7.40% — except LMFP at
-3.45%, 22% short. It cannot be the exception: LiMnₓFe₁₋ₓPO₄ carries the same
-lithium per formula unit as LiFePO₄, and manganese (54.94) and iron (55.85)
-weigh almost the same. Pinned at 4.40% via
-`technology.element_share_of_component_override`.
+### A bug found while testing, worth remembering
 
-*Its energy density.* The workbook implies 336 Wh/kg, which makes LMFP *lighter per kWh than
-NMC mid-Ni* — 2.947 against 3.179 kg/kWh. It cannot be: LMFP is LFP with
-manganese substituted in, and its advantage is a higher voltage plateau, not a
-nickel-cobalt cathode. Two further signs it is a rescaled LFP rather than a
-measurement: the ratio to LFP is near-uniform across every component (anode 0.68,
-cathode 0.71, separator 0.62, collectors 0.58), where a real cathode change would
-land on the cathode; and every row is `count_value = 1`, `DQS = 2`.
+The figures were bypassing the enclosure split, the structure scaling **and** the
+voltage expansion — all three ran in `main` on the export rows only, so the CSVs
+and the PNGs would have disagreed. Both paths now go through one
+**`apply_pack_rules()`**. *If you add a third consumer, use that function.*
 
-Pinned at 270, between LFP's 233 and NMC low-Ni's 285. Correcting it means
-**rescaling the cell**, because a composition per kWh IS an energy-density claim:
-kg/kWh is one over Wh/kg. `Value`, `min_value` and `max_value` scale together —
-`_factor_bounds` checks the band is a fixed proportion of the value, so scaling
-one alone would have broken every LMFP distribution rather than merely biased it.
-Ordering restored: LFP 233, LMFP 270, NMC low 285, NMC mid 311, NMC high 339.
-**Revisit if WP3 revises the workbook** — the parameter is
-`technology.cell_density_override_wh_per_kg`.
-
-**The finding worth keeping.** The structure scales with the battery it carries,
-not with its kWh. Carried over unscaled, NMC's 87 kg frame exceeded the entire
-88 kg a 45 kWh 2060 pack is meant to weigh, and **16 of 20 segment-years came out
-negative**. Scaled, none do, and the unknown active material lands at **48–61%**
-of pack mass against roughly 42% in today's NMC — the right direction for a
-chemistry that has shed this much inert structure. A guard raises rather than
-writing a negative mass, so it now catches a real contradiction.
-
-**Matthias's rule of thumb checks out, in the middle years only.** "A 150 kWh
-solid-state pack uses the materials of a 75 kWh one" needs the density ratio to
-be exactly 2. It is 1.79 in 2040 — a 150 kWh pack is then 12% *heavier* than a
-75 kWh NMC — passes through 2 around 2050 (the 200/100 case lands at **0.99**),
-and reaches 2.68 by 2060.
+This is the second time these two outputs drifted apart. The first was
+`density_factor` applied to the consolidated files but not the segment-year
+ones, which had nickel falling 23% in one and never moving in the other.
 
 ---
 
-## 5. Open
+## 4. Decided today, and what it rests on
 
-0. **The figures were rejected and rebuilt.** Settled 2026-09-10. `03` now draws
-   all elements in one stacked figure per chemistry, plus one figure per critical
-   raw material across every chemistry; `03` draws one figure per material with
-   every chemistry's distribution overlaid in absolute kg. Two constraints he
-   stated and neither should be undone: **no log scales**, and **no small
-   figures** — so no facet grids, one subject per full-size figure.
+| decision | value | rests on |
+|---|---|---|
+| Improvement to 2070 | **15 / 20 / 30 %**, triangular | supplied. Was 25%, revised down |
+| Improvement starts | **2020** | supplied. Replaced a steep-then-flat curve that reached its full −23% by 2050 and did nothing after |
+| Sodium cell density | **200 Wh/kg** | supplied — "car sodium is already around 200". Replaced 160 |
+| Module enclosure | **50/50 Al/Fe** | supplied. The workbook files all of it as iron. Component total unchanged, only its makeup moves |
+| Solid-state keeps module enclosures | **34.6 kg at 80 kWh** | they are pack hardware, not cell packaging — the same box the frame bolts into. They had been grouped with the cell packaging by mistake, leaving solid-state the only one of nine without them |
+| Solid-state cell packaging | **all gone** — no casing, separator, electrolyte or per-cell terminals | bipolar with many layers |
+| Solid-state collectors | **halved** | one clad Al–Cu plate shared between adjacent layers; the many-layer limit of (N+1)/2N |
+| Copper at 800 V | **× 2/3** | supplied. A third off, not a half |
+| Capacity growth scenarios | `saturate` / `grow_low` +5%/decade / `grow_high` +10%/decade | supplied. **A–D and JA–JD only** |
 
-   Uncertainty on the stacked figure is on the TOTAL only. That is a real limit,
-   not laziness: iron is 600× lithium, so on one linear axis a per-element band
-   for lithium is thinner than its own line. Per-element bands are on the CRM
-   figures. If per-element uncertainty is wanted per chemistry, the only honest
-   way on a linear axis is two figures split by magnitude — offered, not taken.
+### The price finding, which is the evidence behind the capacity scenarios
 
-1. **The active materials for sodium and solid-state.** Still the only real gap.
-   Cathode, anode and electrolyte are `unknownBatteryMaterial`. **Both** now have
-   a density trajectory, so both carry a total as `unknown_remainder` — sodium's
-   was empty until today. The split between cathode and anode is not known for
-   either. **The numbers have to come from literature or WP3.**
-2. **150 and 200 kWh.** The model answers for them (range 10–200 kWh) and the
-   density scaling extends cleanly — remainder 64–71%, no negatives. But they are
-   50% and 100% past the last anchor and **untested there**, and *nothing asks for
-   those capacities*: the 600 km saturation caps every segment near 106 kWh. To
-   make them appear, something has to drive them — a large-battery segment, or a
-   higher range target. **That decision was not taken.**
-3. **Interpolation checked on one chemistry only.** Extend to the other six
-   before relying on the fraction arrays.
-4. **The electrolyte's element breakdown** itemises only lithium, losing 99% of
+Across **717 A–D models** with a German list price, from `EV_details.csv`:
+
+- at the **same capacity and segment**, an LFP car is **17.7% ± 1.4 pp cheaper**
+- at the **same price and segment**, it carries **+2.0% ± 1.8 pp more kWh** —
+  statistically nothing
+
+So through 2026 the chemistry cost saving went **essentially all to price and
+none to capacity**. That is why `saturate` is the default: it is what the record
+shows. The `grow_*` scenarios assume the split changes; nothing measured says it
+will, and the parameter comment says so.
+
+Supporting measurements, same source:
+
+- median capacity plateaued at **~82 kWh from 2023**, while fast-charge power
+  rose 101 → 180 kW (2020 → 2024) and the C-rate went 1.69 → 2.20 and flattened
+- motor count flat at **~1.4** since 2020 (AWD 532 / Rear 402 / Front 392),
+  median power flat at **210–220 kW** since 2022
+- segment F runs at **1256 €/kWh** against 625–790 in A–C — the large segments
+  are not price-constrained, which is why they do not grow
+
+### The two LMFP corrections still stand
+
+Both override the source and both live in parameters, so a WP3 revision removes
+them: lithium pinned at **4.40%** of cathode (stoichiometry; the workbook's 3.45%
+is 22% short and LMFP cannot be the one exception), and cell density pinned at
+**270 Wh/kg** (the workbook implies 336, which would make LMFP lighter per kWh
+than NMC mid-Ni). Correcting the density **rescales the cell**, because kg/kWh is
+one over Wh/kg. Ordering restored: LFP 233, LMFP 270, NMC low 285, NMC mid 311,
+NMC high 339.
+
+---
+
+## 5. Open — nothing below has been decided
+
+**Raised and waiting on Matthias:**
+
+1. **Thermal conductor for sodium and solid-state.** Both have much lower thermal
+   demand and should carry less than the 41.8 kg the lithium packs do — *except
+   under fast charging*, where the heat is the same whatever the cathode is. Two
+   numbers needed: the reduction, and whether fast charging cancels it. **Not
+   started.**
+2. **Solid-state's density gain was flattened.** It ran 400 → 800 Wh/kg, a
+   doubling. It now takes the same 20% as everything else (400 → 500). Bipolar
+   with many layers is the argument for keeping it steeper. **Flagged, not
+   confirmed.**
+3. **Sodium's own curve was overwritten.** The 160 / 200 / 220 Wh/kg at
+   2030/2040/2050 is gone, replaced by the 2020→2070 ramp. **Flagged, not
+   confirmed.**
+
+**Known wrong, deliberately not fixed:**
+
+4. **Sodium and solid-state capacity is a constant 86.4 kWh in segment C for
+   every year 2020–2070.** `range_saturated_capacities()` fires on
+   `if unknown and ...`, so it applies to those two chemistries and to no others,
+   and the line that sets it has **no year in it**:
+   ```python
+   saturated = wh_per_km * 600 / 1000      # wh_per_km: one median, no year
+   ```
+   Segment C's own cars were 50.6 kWh in 2020 and 64.0 in 2025. It also means
+   those two chemistries are **deaf to `export.capacity_scenario`**: under
+   `saturate` sodium is 31% above the lithium capacity and under `grow_high` 14%
+   below — the sign flips. A fix was written and **reverted on instruction**. The
+   open question was: range saturation **off for all nine, or on for all nine**.
+   It must never again apply to a subset.
+5. **The fitted capacity curve.** `segment_capacities()` still calls
+   `ev.curve(segment)`. Matthias's position is unambiguous — *"fitting is shit"* —
+   and the evidence supports him: seven observed years against forty-four
+   projected, per-segment slopes running **−2.5 to +2.4 kWh/yr** with no
+   consistent sign, and the fit disagreeing with its own data (segment C measured
+   62.0 kWh in 2020, the fit says 50.6; JC's fit is 5.7 kWh below the 2026
+   median). A fleet median also moves when the **model mix** changes, not only
+   when batteries change, so its slope is not a technology trend.
+   A replacement — measured recent-year median as the anchor,
+   `capacity_scenario` carrying everything after — was written and **reverted on
+   instruction, twice**. Do not start it again without being asked.
+
+**Still the real gap:**
+
+6. **Active materials for sodium and solid-state.** Cathode, anode and
+   electrolyte are `unknownBatteryMaterial`. The split is not known for either.
+   **The numbers have to come from literature or WP3.**
+
+**Older, still open:**
+
+7. **Capacity trend from long-history nameplates.** Matthias's own method: a
+   trend needs models with a long history, not a cross-section. Ten candidates
+   were identified. Two traps found: "Tesla Model" lumps 3/S/X/Y across 84
+   variants, and the BMW i3 series shows 21.6 → 115 kWh, which is a data error.
+8. **Interpolation checked on one chemistry only** (`battLiNMC_midNi`: within
+   0.51% interpolating, 0.41% extrapolating). Extend to the other six before
+   relying on the fraction arrays.
+9. **The electrolyte's element breakdown** itemises only lithium, losing 99% of
    its own mass at element level.
-5. **Sales weighting** — every vehicle-table result is by models, not
-   registrations.
-6. **`battery_size_map` is low for every segment** — JB +23%, JC +21%, JE +24%
-   against the fitted values on the useable basis. Changing it moves published
-   results in RAWCLICStockAndFlow.
+10. **Sales weighting** — every vehicle-table result is by models, not
+    registrations.
+11. **`battery_size_map` is low for every segment** — JB +23%, JC +21%, JE +24%.
+    Changing it moves published results in RAWCLICStockAndFlow.
+12. **Stock-and-flow stage 04 is Matthias's own.** `04_01`, `04_03`, `04_04`.
+    **Do not take it up unless he asks.** Two findings from looking, worth
+    keeping: the undocumented `÷1000` in `04_04` is a **kg→tonne** conversion, not
+    the g→kg its comment guesses, so that file's `"Mass [kg]"` axis label is wrong
+    by 1000×; and `04_03`/`04_04` hardcode their scenario lists while `04_01` uses
+    `active_scenario_names()`.
 
 ---
 
@@ -278,19 +341,23 @@ and reaches 2.68 by 2060.
 
 | | |
 |---|---|
-| `src/params_schema.py` | **the file to edit.** 113 settings, each with its own comment; `00_parameters.py` validates every one |
-| `src/composition.py` | composition at any capacity, with uncertainty; `element_draws_at()` returns the draws themselves |
-| `src/ev_details.py` | the vehicle table: parsing, smoothing, bootstrap |
-| `src/scenarios.py` | the three scenarios and the returning mix |
-| `05_composition.py` | the deliverable, including `build_unknown_rows` for the two unknown chemistries |
+| `src/params_schema.py` | **the file to edit.** 125 settings, each with its own comment; `00_parameters.py` validates every one |
+| `src/composition.py` | composition at any capacity, with uncertainty. `weights_at()` takes `year_factor_draws`; `element_draws_at()` returns the draws themselves |
+| `src/ev_details.py` | the vehicle table: parsing, smoothing, the fitted curve (see §5.5) |
+| `src/scenarios.py` | the three chemistry-share scenarios |
+| `05_composition.py` | the deliverable. `apply_pack_rules()`, `fixed_capacity_rows()`, `improvement_factor_draws()`, `build_unknown_rows()` |
+| `technology.mass_improvement_2070` | **the improvement, as a distribution** |
+| `technology.structure_reference_chemistry` | sets the iron level for all nine |
+| `technology.pack_voltages_v` / `copper_scale_by_voltage` | 400 V and 800 V |
+| `technology.module_enclosure_split` | the 50/50 Al/Fe judgement |
 | `export.unknown_chemistry_template` | what may be claimed about sodium and solid-state, and why |
+| `export.capacity_scenario` | `saturate` / `grow_low` / `grow_high` |
+| `technology.cell_density_override_wh_per_kg` | where the workbook's density is not believed — LMFP only |
 | `data/raw/` | the two inputs — **not in git**, supplied via iCloud |
 | `data/composition/` | nine segment-year CSVs plus `element_draws/` — generated |
-| `data/consolidated/` | **the deliverable** — nine files in the workbook schema plus their draw arrays, from `03` |
-| `technology.chemistry_energy_density` | every chemistry's trajectory, and the reasoning for each |
-| `technology.cell_density_override_wh_per_kg` | where the workbook's density is not believed — currently LMFP only |
-| `figures/` | nine figures — generated |
+| `data/consolidated/` | **the deliverable** — nine files in the workbook schema plus their draw arrays |
+| `figures/` | 32 figures — generated |
 
 **No data file is ever committed.** `data/` and `figures/` are excluded at the
-folder, so a new output cannot slip through by having an extension nobody listed.
-That includes the 328 MB of `element_draws/`.
+folder, so a new output cannot slip through by having an extension nobody
+listed.
