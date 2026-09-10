@@ -832,6 +832,18 @@ class ExportParams:
     # SAFE TO CHANGE: yes, to another anchor.
     distribution_figure_capacity_kwh: float = 80.0
 
+    # Where 09 writes the consolidated per-chemistry files, in the input
+    # workbook's own schema. Separate from composition_output_dir so the
+    # segment-year files and these cannot be confused for each other.
+    # SAFE TO CHANGE: yes.
+    consolidated_output_dir: str = "data/consolidated"
+
+    # The year the energy-density trajectories are measured AT. Masses in every
+    # other year are scaled by density(this year) / density(that year), so this
+    # is the year in which the workbook's composition is taken to be true.
+    # SAFE TO CHANGE: yes, but it shifts every year's mass, not just one.
+    density_base_year: int = 2025
+
     export_levels: tuple[str, ...] = ("component", "material", "element")
 
     # Include the Monte Carlo percentile columns.
@@ -1112,6 +1124,26 @@ class TechnologyParams:
     #
     # SAFE TO CHANGE: yes. Say which basis you are using -- it is the single
     # easiest thing to get wrong here.
+    # WHERE THE WORKBOOK'S OWN ENERGY DENSITY IS NOT BELIEVED, in Wh/kg at CELL
+    # level. The composition is rescaled so the cell's kg/kWh matches -- see
+    # CompositionModel._apply_density_override. Empty means take the workbook.
+    #
+    # battLiMFP: the workbook implies 336 Wh/kg, which makes LMFP LIGHTER per kWh
+    # than NMC mid-Ni -- 2.947 against 3.179 kg/kWh at the 80 kWh sheet. It cannot
+    # be: LMFP is LFP with manganese substituted in, and its advantage is a higher
+    # voltage plateau, not a nickel-cobalt cathode. The workbook has it 1.44x
+    # better than LFP. Two further signs it is a rescaled LFP rather than a
+    # measurement: the ratio to LFP is near-uniform across every component
+    # (anode 0.68, cathode 0.71, separator 0.62, collectors 0.58), where a real
+    # cathode change would land mostly on the cathode; and every row is
+    # count_value = 1, DQS = 2, so it carries no more evidence than the rest.
+    # Pinned 2026-09-10 at 270, between LFP's 233 and NMC low-Ni's 285, which
+    # restores the physical ordering. It raises LMFP material demand ~24%.
+    # SAFE TO CHANGE: yes, and it should change if WP3 revises the workbook.
+    cell_density_override_wh_per_kg: dict[str, float] = field(default_factory=lambda: {
+        "battLiMFP_subsub": 270.0,
+    })
+
     chemistry_energy_density: dict[str, dict] = field(default_factory=lambda: {
         # 400 Wh/kg is where solid-state cells ARE, not where they arrive in 2040.
         # The old trajectory started at 400 in 2040 and so built in a decade of no
@@ -1124,6 +1156,40 @@ class TechnologyParams:
             "years": (2030, 2040, 2050, 2060, 2070),
             "wh_per_kg": (400.0, 500.0, 600.0, 700.0, 800.0),
         },
+        # THE SEVEN LITHIUM CHEMISTRIES. Until 2026-09-10 they had no trajectory
+        # at all, so their kg/kWh was frozen forever and a 2070 NMC pack held
+        # exactly the materials of a 2030 one. They never improved because the
+        # model never let them.
+        #
+        # Today's values are MEASURED from the workbook -- cell mass at 75 kWh
+        # gives the cell's Wh/kg directly, and battLiMFP is post-override at 270.
+        # Matthias supplied 330 for NMC and 235 for LFP; the measured 339 and 233
+        # are within 3%, and the measured ones are used so that the trajectory and
+        # the composition cannot contradict each other. A trajectory saying 330
+        # against a composition implying 339 would make the implied pack mass
+        # disagree with the sum of its own parts.
+        #
+        # +30% by 2050, supplied, then FLAT to 2070. Flat is a claim, and the
+        # reason is a ceiling: +30% puts NMC at 440 Wh/kg cell, and liquid
+        # electrolyte with a graphite or silicon anode runs out near 400-450.
+        # Going further needs a lithium-metal anode, which is not this chemistry
+        # any more -- it is solid_state, tracked separately. After 2050 the gains
+        # come from SWITCHING chemistry, not from improving the old one.
+        "battLiFP_subsub":   {"basis": "cell", "years": (2025, 2050, 2070),
+                              "wh_per_kg": (233.0, 303.0, 303.0)},
+        "battLiMO_subsub":   {"basis": "cell", "years": (2025, 2050, 2070),
+                              "wh_per_kg": (231.0, 300.0, 300.0)},
+        "battLiMFP_subsub":  {"basis": "cell", "years": (2025, 2050, 2070),
+                              "wh_per_kg": (270.0, 351.0, 351.0)},
+        "battLiNMC_lowNi":   {"basis": "cell", "years": (2025, 2050, 2070),
+                              "wh_per_kg": (285.0, 371.0, 371.0)},
+        "battLiNCA_subsub":  {"basis": "cell", "years": (2025, 2050, 2070),
+                              "wh_per_kg": (306.0, 398.0, 398.0)},
+        "battLiNMC_midNi":   {"basis": "cell", "years": (2025, 2050, 2070),
+                              "wh_per_kg": (311.0, 404.0, 404.0)},
+        "battLiNMC_highNi":  {"basis": "cell", "years": (2025, 2050, 2070),
+                              "wh_per_kg": (339.0, 441.0, 441.0)},
+
         # Sodium improves too, and treating it as static was wrong: without a
         # trajectory it had no pack mass, so its unknown active material could
         # carry no number at all while solid-state's could.
@@ -1148,6 +1214,20 @@ class TechnologyParams:
     # 0.47x to 0.57x of today.
     cell_to_pack_ratio: dict[str, float] = field(default_factory=lambda: {
         "solid_state": 0.85,
+        # The seven lithium chemistries, MEASURED from the workbook at 75 kWh --
+        # cell mass over pack mass. battLiMFP is 0.616 rather than the 0.563 it
+        # showed before its density override, because pinning the cell heavier
+        # raises the cell's share of a pack whose hardware did not change.
+        # Each is an approximation: the real ratio rises with capacity, because
+        # the pack hardware does not scale with the cells.
+        "battLiFP_subsub": 0.650,
+        "battLiMFP_subsub": 0.616,
+        "battLiMO_subsub": 0.652,
+        "battLiNCA_subsub": 0.585,
+        "battLiNMC_highNi": 0.561,
+        "battLiNMC_lowNi": 0.603,
+        "battLiNMC_midNi": 0.582,
+
         # MEASURED, not chosen: this is LFP's own ratio in the workbook, which is
         # where sodium's packaging comes from. Sodium is a conventional format
         # with a normal casing, so it has no reason to beat LFP.
@@ -1541,10 +1621,15 @@ class Params:
                 f"technology.range_saturation_km must be positive: "
                 f"{tech.range_saturation_km}")
         for chemistry, entry in tech.chemistry_energy_density.items():
-            if chemistry not in sc.scenario_colours:
+            # Either naming is allowed: the SCENARIO chemistries (Na_ion,
+            # solid_state) and the WORKBOOK ones (battLiFP_subsub, ...). Both are
+            # real chemistries with real trajectories; this check exists to catch
+            # a typo, not to insist on one vocabulary.
+            if (chemistry not in sc.scenario_colours
+                    and chemistry not in sc.workbook_chemistry_colours):
                 raise ParameterError(
                     f"technology.chemistry_energy_density names {chemistry!r}, which "
-                    "appears in no scenario.")
+                    "is neither a scenario chemistry nor a workbook chemistry.")
             missing = sorted({"basis", "years", "wh_per_kg"} - set(entry))
             if missing:
                 raise ParameterError(

@@ -176,7 +176,48 @@ class CompositionModel:
             "Layer 1": "chemistry", "Layer 2": "component", "Layer 4": "element",
             "parameterCode": "code", "Value": "intensity",
         })
+        rows = self._apply_density_override(rows)
         rows["mass_kg"] = rows["intensity"] * rows["kwh"]
+        return rows
+
+    def _apply_density_override(self, rows: pd.DataFrame) -> pd.DataFrame:
+        """
+        Rescale a chemistry's CELL composition to an agreed energy density.
+
+        The workbook states a composition, and a composition per kWh IS an
+        energy-density claim: the cell's kg/kWh is one over its Wh/kg. Where
+        that claim is not believed, correcting it means rescaling the cell, not
+        writing a different number somewhere else and leaving the masses alone.
+
+        Only the chemistry's own rows move. The pack hardware is filed under
+        `battPackXEV` and is chemistry-independent, so it is untouched.
+
+        Value, min_value and max_value scale TOGETHER. `_factor_bounds` checks
+        that the band is a fixed proportion of the value and raises if it is
+        not, so scaling one without the others would break the Monte Carlo
+        rather than merely bias it.
+        """
+        override = self.params.technology.cell_density_override_wh_per_kg
+        if not override:
+            return rows
+
+        code = self.params.scope.component_parameter_code
+        for chemistry, target_wh_per_kg in override.items():
+            present = rows.chemistry == chemistry
+            if not present.any():
+                raise CompositionError(
+                    f"technology.cell_density_override_wh_per_kg names "
+                    f"{chemistry!r}, which is not in the workbook.")
+            for capacity in sorted(rows.loc[present, "kwh"].unique()):
+                at = present & (rows.kwh == capacity)
+                current = rows.loc[at & (rows.code == code), "intensity"].sum()
+                if current <= 0:
+                    raise CompositionError(
+                        f"{chemistry} has no component-level mass at {capacity} "
+                        f"kWh, so its density cannot be rescaled.")
+                factor = (1000.0 / target_wh_per_kg) / current
+                for column in ("intensity", "min_value", "max_value"):
+                    rows.loc[at, column] = rows.loc[at, column] * factor
         return rows
 
     def _build_series(self) -> _Series:
