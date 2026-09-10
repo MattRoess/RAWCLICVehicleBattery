@@ -842,6 +842,19 @@ class ExportParams:
     # SAFE TO CHANGE: yes, to another anchor.
     distribution_figure_capacity_kwh: float = 80.0
 
+    # ⚠️ WHICH YEAR THE DISTRIBUTION FIGURES ARE FOR. They had none: the draws
+    # came straight from the workbook with no year applied, so they were the
+    # base year by accident and said so nowhere. A distribution of a mass is
+    # meaningless without the year it belongs to -- the same pack is 20%
+    # lighter in 2070 and its band is wider.
+    #
+    # The default is the base year, so the numbers are what they have always
+    # been and only the label is new. Set it to any export year and the
+    # improvement is applied, draw by draw, exactly as the composition files
+    # apply it.
+    # SAFE TO CHANGE: yes.
+    distribution_figure_year: int = 2020
+
     # Where 09 writes the consolidated per-chemistry files, in the input
     # workbook's own schema. Separate from composition_output_dir so the
     # segment-year files and these cannot be confused for each other.

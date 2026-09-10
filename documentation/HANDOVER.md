@@ -90,7 +90,7 @@ ls data/raw/                                            # the .xlsx and the .csv
 ## 2. Running it
 
 ```bash
-./.venv/bin/python 00_parameters.py                 # always first, validates 127 settings
+./.venv/bin/python 00_parameters.py                 # always first, validates 128 settings
 ./.venv/bin/python 99_check_environment.py
 ./.venv/bin/python 01_draw_battery_structure.py
 ./.venv/bin/python 02_composition_by_capacity.py
@@ -226,6 +226,31 @@ the central in 2020 to **21.6%** in 2070, and the central falls exactly 20.0%.
 > `technology.chemistry_energy_density` are now **decorative for mass** — change
 > one and the other will not follow. This is a trap; the docstring says so.
 
+### The distribution figures have a year, and it is a parameter
+
+They had none. `collect_draws()` took the draws straight from the workbook with
+nothing applied, so they were the base year by accident and said so in no
+title. **`export.distribution_figure_year`** names it, defaulting to 2020 — the
+numbers are what they always were and only the label is new. Set it to any
+export year and `improvement_factor_draws()` is applied draw by draw, exactly
+as the composition files apply it, so both the mass and the band move.
+
+> **The band is asymmetric, and that is correct.** LFP at 80 kWh is
+> −36.1 / +36.1 kg in 2020 and **−48.1 / +32.3 kg** in 2070. The triangular
+> runs 15 / 20 / 30, so mode-to-max is 0.10 against 0.05 from min-to-mode: the
+> improvement can beat expectations by twice as much as it can disappoint, and
+> more improvement means a lighter pack. The skew is the spec, not a defect —
+> confirmed and kept on 2026-09-10. A symmetric band would need a symmetric
+> spec, 12.5 / 20 / 27.5.
+
+> **What the band does NOT yet carry is uncertainty about the projection
+> itself.** In kg it narrows before it widens: 72.1 kg in 2020, 69.5 in 2035,
+> 80.4 in 2070, because the composition band shrinks with the mass while the
+> improvement's own spread (±9.7 pp on a 20% improvement) barely outruns it. A
+> 2070 pack is therefore drawn as almost as well known as a 2020 one, which it
+> is not. A horizon-growing projection term would fix it; its width was never
+> chosen. **Raised 2026-09-10, not decided.**
+
 ### The structure follows the weight it carries
 
 The workbook gives every chemistry the **same** iron at a given capacity. That
@@ -338,17 +363,9 @@ NMC high 339.
    2030/2040/2050 is gone, replaced by the 2020→2070 ramp. **Flagged, not
    confirmed.**
 
-4. **The distribution figures are drawn at the base year**, with no improvement
-   applied and no year in their titles. `collect_draws()` calls
-   `element_draws_at()` with no year argument, so those bands are narrower than
-   the composition files say for any later year. The fix is a
-   `distribution_figure_year` parameter and the same
-   `improvement_factor_draws()` the composition files use. **Waiting on which
-   year.**
-
 **Both moved to `06_segment_capacity.py`, which is no longer the deliverable:**
 
-5. **Sodium and solid-state capacity is a constant 86.4 kWh in segment C for
+4. **Sodium and solid-state capacity is a constant 86.4 kWh in segment C for
    every year 2020–2070.** `range_saturated_capacities()` fires on
    `if unknown and ...`, so it applies to those two chemistries and to no others,
    and the line that sets it has **no year in it**:
@@ -361,7 +378,7 @@ NMC high 339.
    below — the sign flips. A fix was written and **reverted on instruction**. The
    open question was: range saturation **off for all nine, or on for all nine**.
    It must never again apply to a subset.
-6. **The fitted capacity curve.** `segment_capacities()` still calls
+5. **The fitted capacity curve.** `segment_capacities()` still calls
    `ev.curve(segment)`, in `06`. Matthias's position is unambiguous — *"fitting is shit"* —
    and the evidence supports him: seven observed years against forty-four
    projected, per-segment slopes running **−2.5 to +2.4 kWh/yr** with no
@@ -375,26 +392,26 @@ NMC high 339.
 
 **Still the real gap:**
 
-7. **Active materials for sodium and solid-state.** Cathode, anode and
+6. **Active materials for sodium and solid-state.** Cathode, anode and
    electrolyte are `unknownBatteryMaterial`. The split is not known for either.
    **The numbers have to come from literature or WP3.**
 
 **Older, still open:**
 
-8. **Capacity trend from long-history nameplates.** Matthias's own method: a
+7. **Capacity trend from long-history nameplates.** Matthias's own method: a
    trend needs models with a long history, not a cross-section. Ten candidates
    were identified. Two traps found: "Tesla Model" lumps 3/S/X/Y across 84
    variants, and the BMW i3 series shows 21.6 → 115 kWh, which is a data error.
-9. **Interpolation checked on one chemistry only** (`battLiNMC_midNi`: within
+8. **Interpolation checked on one chemistry only** (`battLiNMC_midNi`: within
    0.51% interpolating, 0.41% extrapolating). Extend to the other six before
    relying on the fraction arrays.
-10. **The electrolyte's element breakdown** itemises only lithium, losing 99% of
+9. **The electrolyte's element breakdown** itemises only lithium, losing 99% of
    its own mass at element level.
-11. **Sales weighting** — every vehicle-table result is by models, not
+10. **Sales weighting** — every vehicle-table result is by models, not
     registrations.
-12. **`battery_size_map` is low for every segment** — JB +23%, JC +21%, JE +24%.
+11. **`battery_size_map` is low for every segment** — JB +23%, JC +21%, JE +24%.
     Changing it moves published results in RAWCLICStockAndFlow.
-13. **Stock-and-flow stage 04 is Matthias's own.** He is starting it fresh.
+12. **Stock-and-flow stage 04 is Matthias's own.** He is starting it fresh.
     **Nothing about it belongs in this file, and no analysis of it should be
     offered unless he asks.**
 
@@ -404,13 +421,14 @@ NMC high 339.
 
 | | |
 |---|---|
-| `src/params_schema.py` | **the file to edit.** 127 settings, each with its own comment; `00_parameters.py` validates every one |
+| `src/params_schema.py` | **the file to edit.** 128 settings, each with its own comment; `00_parameters.py` validates every one |
 | `src/composition.py` | composition at any capacity, with uncertainty. `weights_at()` takes `year_factor_draws`; `element_draws_at()` returns the draws themselves |
 | `src/ev_details.py` | the vehicle table: parsing, smoothing, the fitted curve. **`05` no longer imports it** — only `06` does |
 | `src/scenarios.py` | the three chemistry-share scenarios |
 | `05_composition.py` | **the deliverable.** `apply_pack_rules()`, `fixed_capacity_rows()`, `improvement_factor_draws()`, `build_unknown_rows()` |
 | `06_segment_capacity.py` | the segment work cut out of `05`. Runnable, not needed, two known defects in its docstring |
 | `technology.mass_improvement_2070` | **the improvement, as a distribution** |
+| `export.distribution_figure_year` | which year the distribution figures are for |
 | `technology.structure_reference_chemistry` | sets the iron level for all nine |
 | `technology.pack_voltages_v` / `copper_scale_by_voltage` | 400 V and 800 V |
 | `technology.module_enclosure_split` | the 50/50 Al/Fe judgement |

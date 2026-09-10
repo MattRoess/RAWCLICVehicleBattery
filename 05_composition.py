@@ -729,15 +729,30 @@ def histogram_density(values: np.ndarray, grid: np.ndarray, bins: int = 200) -> 
 
 def collect_draws(model: CompositionModel, params, capacity: float, element: str | None
             ) -> dict[str, np.ndarray]:
-    """Every chemistry's draws for one element, or for the whole pack."""
+    """
+    Every chemistry's draws for one element, or for the whole pack, IN A YEAR.
+
+    The year is not optional. These draws used to come straight from the
+    workbook with nothing applied, which made them the base year by accident
+    and labelled nowhere -- a distribution of a mass means nothing without the
+    year it belongs to, since the same pack is 20% lighter in 2070 and its
+    band is wider. `export.distribution_figure_year` names it, and the
+    improvement is applied draw by draw exactly as the composition files apply
+    it: element-wise, so the improvement draw and the composition draw that
+    meet in one column are the same draw.
+    """
     out: dict[str, np.ndarray] = {}
     known = sorted(set(model._series.keys["chemistry"])
                    - {params.scope.pack_level_key})
+    year = float(params.export.distribution_figure_year)
+    year_draws = improvement_factor_draws(params, year)
     for chemistry in known:
         try:
             elements, masses = model.element_draws_at(capacity, chemistry=chemistry)
         except CompositionError:
             continue
+        if year_draws is not None:
+            masses = masses * np.asarray(year_draws)[None, :]
         if element is None:
             row = masses.sum(axis=0)
         else:
@@ -764,6 +779,11 @@ def shared_pack_draws(model: CompositionModel, params, capacity: float
     wanted = ((keys["code"] == scope.component_parameter_code)
               & (keys["chemistry"] == scope.pack_level_key))
     draws = model.mass_draws_at(float(capacity))[wanted.to_numpy()]
+    # The same year as every other distribution figure, applied the same way.
+    year_draws = improvement_factor_draws(
+        params, float(params.export.distribution_figure_year))
+    if year_draws is not None:
+        draws = draws * np.asarray(year_draws)[None, :]
     subset = keys[wanted].reset_index(drop=True)
     out: dict[str, np.ndarray] = {}
     for component, positions in subset.groupby("component").indices.items():
@@ -1072,8 +1092,9 @@ def main(argv: list[str] | None = None) -> int:
                           for i, name in enumerate(shared)}
         figure = draw_distribution(
             shared,
-            f"Parts every battery shares, at {capacity:.0f} kWh \u2014 identical "
-            f"whatever chemistry is inside\n{params.monte_carlo.n_draws:,} draws; "
+            f"Parts every battery shares, at {capacity:.0f} kWh in "
+            f"{params.export.distribution_figure_year} \u2014 identical whatever "
+            f"chemistry is inside\n{params.monte_carlo.n_draws:,} draws; "
             "solid line the mode, dotted the 2.5 and 97.5 percentiles",
             "mass in one car [kg]", params, colours=shared_colours)
         if figure is not None:
@@ -1083,7 +1104,8 @@ def main(argv: list[str] | None = None) -> int:
 
     figure = draw_distribution(
         collect_draws(model, params, capacity, None),
-        f"Whole battery mass at {capacity:.0f} kWh \u2014 every chemistry\n"
+        f"Whole battery mass at {capacity:.0f} kWh in "
+        f"{params.export.distribution_figure_year} \u2014 every chemistry\n"
         f"{params.monte_carlo.n_draws:,} draws; solid line the mode, dotted the "
         "2.5 and 97.5 percentiles",
         "battery mass in one car [kg]", params)
@@ -1093,9 +1115,10 @@ def main(argv: list[str] | None = None) -> int:
     for element in params.export.crm_elements:
         figure = draw_distribution(
             collect_draws(model, params, capacity, element),
-            f"{element} at {capacity:.0f} kWh \u2014 every chemistry that contains "
-            f"it\n{params.monte_carlo.n_draws:,} draws; solid line the mode, dotted "
-            "the 2.5 and 97.5 percentiles",
+            f"{element} at {capacity:.0f} kWh in "
+            f"{params.export.distribution_figure_year} \u2014 every chemistry that "
+            f"contains it\n{params.monte_carlo.n_draws:,} draws; solid line the mode, "
+            "dotted the 2.5 and 97.5 percentiles",
             f"{element} in one car [kg]", params)
         if figure is not None:
             save_figure(figure, params, f"distribution_{element}_{capacity:.0f}kWh.png")
