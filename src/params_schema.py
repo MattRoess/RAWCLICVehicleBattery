@@ -874,9 +874,23 @@ class ExportParams:
             # The packaging is what can be claimed. Everything here keeps the base
             # chemistry's mass; the cathode, anode and electrolyte stay empty. At
             # 75 kWh that fills 46.7% of the pack and leaves 53.3% open.
-            "claim_masses_for": ("currentCollectorAnode", "currentCollectorCathode",
-                                 "batteryCellCasing", "batteryCellSeparator",
+                        # EVERYTHING THAT IS NOT THE CHEMISTRY. The can, the separator, the
+            # terminals, the collectors and the four pack components. A sodium
+            # cell sits in the same steel or aluminium can as a lithium one, in
+            # the same format, behind the same porous separator -- nothing about
+            # sodium changes those. The workbook files casing and separator under
+            # the chemistry's own Layer 1 rather than under battPackXEV, which is
+            # bookkeeping, not a statement that they differ.
+            #
+            # Only the cathode, the anode and the electrolyte are left unclaimed,
+            # because only those actually depend on the chemistry.
+            #
+            # NOTE casing and separator have no element rows anywhere in the
+            # workbook, so they add mass at component and material level and
+            # nothing at element level -- the same 8% gap every chemistry has.
+            "claim_masses_for": ("batteryCellCasing", "batteryCellSeparator",
                                  "batteryPackCellTerminals",
+                                 "currentCollectorAnode", "currentCollectorCathode",
                                  "batteryPackCables", "batteryPackSupportFrame",
                                  "batteryPackThermalConductor",
                                  "batteryPackModuleEnclosuresAndCoolantManifolds"),
@@ -900,17 +914,6 @@ class ExportParams:
             # must not be scaled by a copper-to-aluminium factor.
             "mass_scale": {"currentCollectorAnode": {"Cu": 0.4764},
                            "batteryPackCellTerminals": {"Cu": 0.4764}},
-            # Sodium now HAS a density trajectory, so the same rule applies as for
-            # solid-state: the structure follows the size of the pack it holds.
-            # For sodium the factor is usually ABOVE 1 -- x1.46 at 75 kWh in 2030 --
-            # because a sodium pack storing the same energy is physically bigger
-            # than LFP's, so it needs more frame, not less.
-            # Measured: with this off the remainder swung from 67.9% to 55.8% of
-            # pack mass between 2030 and 2050 purely because the structure was
-            # frozen at LFP's while the pack mass moved. With it on the remainder
-            # holds at 53.3%, which is what should happen when only the cells
-            # improve.
-            "scale_structure_with_density": True,
             "note": ("packaging assumed from LFP -- casing, separator, terminals, "
                      "collectors and pack hardware carry LFP's masses; Al replaces Cu "
                      "as the anode current collector, its mass scaled by 0.4764 for "
@@ -945,25 +948,38 @@ class ExportParams:
             # Packaging only. At 75 kWh this fills 57.5% of the pack -- higher than
             # sodium's 46.7%, because bipolar construction has already removed the
             # separator, the electrolyte and the per-cell terminals.
+                        # The chemistry-independent pack components that survive bipolar
+            # construction -- there is NO cell packaging: no casing, no
+            # separator, no per-cell terminals, no module enclosures -- plus the
+            # current collectors, halved for the shared bipolar plate.
             "claim_masses_for": ("currentCollectorAnode", "currentCollectorCathode",
                                  "batteryPackCables", "batteryPackSupportFrame",
                                  "batteryPackThermalConductor"),
-            # HALVED, because a bipolar plate is shared. In a stacked cell the same
-            # sheet is the cathode collector of one cell and the anode collector of
-            # the next, so the count is roughly halved rather than carried over
-            # one-for-one from a monopolar NMC pack.
+            # ONE CLAD Al-Cu PLATE, reported as its two faces. A bipolar cell has
+            # no separate anode and cathode collector: it has a single plate,
+            # copper on the face towards the anode and aluminium on the face
+            # towards the cathode. The workbook has no name for such a plate and
+            # none is invented here, so it is carried as the two collector rows
+            # -- but they are two faces of one object, not two foils.
+            #
+            # THE FACTOR IS A COUNT, not a thickness. A stack of N layers needs
+            # N+1 plates where a monopolar pack needs 2N foils: 0.55 at ten
+            # layers, 0.525 at twenty, 0.505 at a hundred. 0.5 is the many-layer
+            # limit, which is where a real bipolar stack sits.
+            #
+            # ⚠️ WHAT THIS DOES NOT KNOW is the clad plate's THICKNESS. The count
+            # alone justifies 0.5; if the laminate is as thin as one of the foils
+            # it replaces rather than as thick as both, the copper halves again.
             "mass_scale": {"currentCollectorAnode": {"Cu": 0.5},
                            "currentCollectorCathode": {"Al": 0.5}},
-            # See 05_composition.py: the frame, the thermal
-            # conductor, the cables and the collectors are scaled by the base
-            # chemistry's pack density over solid-state's, because a structure
-            # sized for 190 Wh/kg is far too heavy around a 510 Wh/kg stack.
-            "scale_structure_with_density": True,
-            "note": ("bipolar: no separator, no liquid electrolyte, no per-cell "
-                     "terminals; packaging assumed from NMC_highNi, INCLUDING a copper "
-                     "anode current collector -- a solid-state cell may not need one, "
-                     "so treat that 21.46 kg of copper as an upper bound; anode is Li "
-                     "or Na metal, not graphite, so anode and cathode are NOT known"),
+            "note": ("bipolar: no cell packaging at all -- no separator, no liquid "
+                     "electrolyte, no per-cell "
+                     "terminals, no cell casing, no module enclosures. The two "
+                     "collector rows are the two faces of ONE clad Al-Cu bipolar "
+                     "plate, counted at one plate per layer instead of two foils; "
+                     "its thickness is not known, so the copper is an upper bound. "
+                     "Anode is Li or Na metal, not graphite, so anode and cathode "
+                     "are NOT known"),
         },
     })
 
@@ -1640,8 +1656,7 @@ class Params:
                     "leaving a skeleton that will quietly override it.")
             missing_keys = sorted({"based_on", "remove_components", "element_swaps",
                                    "assert_elements_for", "claim_masses_for",
-                                   "mass_scale", "scale_structure_with_density",
-                                   "note"} - set(template))
+                                   "mass_scale", "note"} - set(template))
             if missing_keys:
                 raise ParameterError(
                     f"export.unknown_chemistry_template[{chemistry!r}] is missing "

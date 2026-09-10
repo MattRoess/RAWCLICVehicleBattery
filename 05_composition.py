@@ -324,8 +324,6 @@ def build_unknown_rows(model: CompositionModel, params, capacities: pd.DataFrame
     """
     template = params.export.unknown_chemistry_template[chemistry]
     base = template["based_on"]
-    implied = capacities.set_index(["segment", "year"])["pack_mass_kg_implied"] \
-        if "pack_mass_kg_implied" in capacities.columns else None
 
     # Build the skeleton at a capacity the composition model will answer for.
     # Only the component and element STRUCTURE is taken from it -- every mass is
@@ -340,32 +338,51 @@ def build_unknown_rows(model: CompositionModel, params, capacities: pd.DataFrame
 
     rows = build_rows(model, params, capacities, base)
 
-    # The base chemistry's OWN pack density, per segment-year, taken before any
-    # removal so it describes the whole pack the borrowed structure was built
-    # for. This is what `scale_structure_with_density` divides into.
-    base_density = None
-    if template["scale_structure_with_density"]:
-        whole = rows[rows.level == rows.level.iloc[0]]
-        base_mass = (whole.groupby(["segment", "year"], dropna=False)["mass_kg"]
-                     .sum())
-        base_capacity = pd.MultiIndex.from_frame(
-            base_mass.index.to_frame()).map(real_capacities)
-        base_density = (pd.Series(base_capacity.to_numpy(), index=base_mass.index)
-                        * 1000.0 / base_mass)
-
     rows = rows[~rows.component.isin(removed)].copy()
 
     # Scale BEFORE the swap, while the row still says which metal it was: the
     # factor is a property of the substitution (copper -> aluminium), so it has
     # to land on the copper rows and not on aluminium that was already there.
+    #
+    # AND THE COMPONENT ROW TOO. The factor is keyed on (component, element),
+    # but a component-level row carries no element -- so scaling only what
+    # matched left currentCollectorAnode at 29.7 kg per the component level and
+    # 14.2 kg per the element level, the same part of the same battery
+    # disagreeing with itself. The component row is scaled by the factor its own
+    # elements imply, mass-weighted: a collector that is all copper takes the
+    # full factor, terminals that are part aluminium already take less.
     mass_columns = [c for c in rows.columns
                     if c.startswith("mass_") or c == "kg_per_kwh"]
+    element_level = rows.level == "element"
     for component, by_element in template["mass_scale"].items():
+        at_component = rows.component == component
+        parts = rows.loc[at_component & element_level]
+        weighted = {}
+        for (segment, year), group in parts.groupby(["segment", "year"], dropna=False):
+            total = pd.to_numeric(group.mass_kg, errors="coerce").sum()
+            if not total:
+                continue
+            scaled = sum(pd.to_numeric(
+                group.loc[group.element == element, "mass_kg"], errors="coerce").sum()
+                * factor for element, factor in by_element.items())
+            untouched = total - sum(pd.to_numeric(
+                group.loc[group.element == element, "mass_kg"], errors="coerce").sum()
+                for element in by_element)
+            weighted[(segment, year)] = (scaled + untouched) / total
+
         for element, factor in by_element.items():
-            target = (rows.component == component) & (rows.element == element)
+            target = at_component & (rows.element == element)
             for column in mass_columns:
                 rows.loc[target, column] = pd.to_numeric(
                     rows.loc[target, column], errors="coerce") * factor
+
+        if weighted:
+            whole = at_component & ~element_level
+            factors = pd.MultiIndex.from_frame(
+                rows.loc[whole, ["segment", "year"]]).map(weighted).to_numpy()
+            for column in mass_columns:
+                rows.loc[whole, column] = pd.to_numeric(
+                    rows.loc[whole, column], errors="coerce") * factors
 
     for component, mapping in swaps.items():
         # Scoped to one component. A blanket swap would recolour every copper in
@@ -407,24 +424,16 @@ def build_unknown_rows(model: CompositionModel, params, capacities: pd.DataFrame
     is_claimed = rows.component.isin(claimed)
     rows["composition_status"] = np.where(is_claimed, "packaging_from_base", "unknown")
 
-    # THE STRUCTURE SCALES WITH THE BATTERY IT CARRIES, NOT WITH ITS kWh. This is
-    # the correction that makes the arithmetic close. A support frame sized for a
-    # 190 Wh/kg pack is far too heavy for a 510 Wh/kg one holding the same energy:
-    # the solid-state stack is physically smaller, so the frame around it is
-    # lighter. Carried over unscaled, the frame alone (87 kg) exceeded the whole
-    # implied mass of a 45 kWh 2060 pack (88 kg), and 16 of 20 segment-years came
-    # out negative. Scaled, none do, and the unknown active material lands at
-    # 48-61% of pack mass -- against roughly 42% in today's NMC, which is the
-    # right direction for a chemistry that has shed this much inert structure.
-    if base_density is not None:
-        year_density = rows.year.map(
-            lambda y: pack_density(params, chemistry, float(y)))
-        factor = (pd.MultiIndex.from_frame(rows[["segment", "year"]])
-                  .map(base_density).to_numpy() / year_density.to_numpy())
-        for column in mass_columns:
-            rows.loc[is_claimed, column] = (
-                pd.to_numeric(rows.loc[is_claimed, column], errors="coerce")
-                * factor[is_claimed.to_numpy()])
+    # NO SCALING. The packaging is the base chemistry's, at its own mass. A
+    # sodium pack is built like the LFP pack it is derived from -- same frame,
+    # same enclosures, same thermal plate -- so it weighs what that weighs.
+    #
+    # Two earlier attempts were both wrong. Scaling by the density ratio made
+    # sodium's frame 1.55x LFP's, because sodium is less energy dense, giving
+    # 343 kg of packaging on a 906 kg pack. Sizing the structure from
+    # cell_to_pack_ratio fixed the internal contradiction but left the pack mass
+    # itself coming from the density trajectory, which is what made it 906 kg in
+    # the first place -- half as heavy again as the LFP pack it is modelled on.
 
     # Wipe the numbers we are NOT claiming. The cathode, the anode and the
     # electrolyte keep nothing: an empty cell is a reader's cue to go and find
@@ -437,51 +446,13 @@ def build_unknown_rows(model: CompositionModel, params, capacities: pd.DataFrame
     rows["capacity_kwh_nominal"] = pd.MultiIndex.from_frame(
         rows[["segment", "year"]]).map(real_capacities)
 
-    # THE REMAINDER. Where the whole pack's mass is known -- a chemistry with a
-    # density trajectory -- what is left after the packaging is the active
-    # material, even though its split between cathode and anode is not known.
-    # One row carries it, rather than the cathode and anode rows each carrying a
-    # guess. Sodium has no density trajectory, so it gets no remainder and its
-    # unknown rows stay empty; that is the honest difference between the two.
-    if implied is not None:
-        claimed_mass = (rows.loc[is_claimed]
-                        .groupby(["segment", "year", "level"], dropna=False)["mass_kg"]
-                        .sum())
-        index = pd.MultiIndex.from_frame(
-            claimed_mass.index.to_frame()[["segment", "year"]])
-        remainder = pd.Series(index.map(implied).to_numpy(),
-                              index=claimed_mass.index) - claimed_mass
-        if (remainder < 0).any():
-            worst = remainder.min()
-            raise CompositionError(
-                f"{chemistry}: the packaging alone weighs more than the pack mass "
-                f"implied by its density trajectory, by up to {-worst:.1f} kg. Either "
-                "the trajectory is too optimistic or the borrowed packaging is too "
-                "heavy -- both are assumptions, and one of them has to give.")
-        extra = claimed_mass.index.to_frame(index=False)
-        extra["component"] = UNKNOWN_MATERIAL
-        extra["element"] = UNKNOWN_MATERIAL
-        extra["mass_kg"] = remainder.to_numpy()
-        extra["branch"] = "cell"
-        extra["chemistry"] = chemistry
-        extra["layer1"] = chemistry
-        extra["composition_status"] = "unknown_remainder"
-        extra["note"] = (template["note"] +
-                         "; this row is the whole pack mass minus the packaging -- "
-                         "the active material in total, not split between cathode "
-                         "and anode")
-        rows = pd.concat([rows, extra], ignore_index=True)
+    # NO REMAINDER. It used to be the base chemistry's pack mass minus the
+    # packaging, and called that the active material -- but that pack mass is
+    # the base CHEMISTRY's, so the remainder was a claim about how much cathode
+    # and anode a sodium cell holds, taken from LFP. Nothing here knows that.
+    # Only the four chemistry-independent pack components carry a mass; the rest
+    # stays unknownBatteryMaterial with no number attached.
 
-    if implied is not None:
-        # The WHOLE PACK's mass follows from the assumed energy density and the
-        # capacity, so it can be stated even though no component's mass can. It
-        # is the same for every row of a segment-year and is not a composition.
-        rows["pack_mass_kg_implied"] = pd.MultiIndex.from_frame(
-            rows[["segment", "year"]]).map(implied)
-        rows["note"] = rows["note"] + (
-            f"; pack mass implied by the {chemistry} density trajectory at a "
-            f"{params.technology.range_saturation_km:g} km range target — a whole-pack "
-            "figure, not a composition")
     return rows
 
 # ---------------------------------------------------------------- constants
@@ -689,8 +660,33 @@ def collect_draws(model: CompositionModel, params, capacity: float, element: str
 
 
 
-def draw_distribution(series: dict[str, np.ndarray], title: str, xlabel: str, params):
-    """Every chemistry's distribution of one quantity, overlaid, in kg."""
+def shared_pack_draws(model: CompositionModel, params, capacity: float
+                      ) -> dict[str, np.ndarray]:
+    """
+    Per-draw mass of the components every battery has in common.
+
+    These are the ones filed under scope.pack_level_key -- one set per pack,
+    identical whatever chemistry is inside it -- so unlike everything else in
+    this project there is ONE distribution, not one per chemistry.
+    """
+    keys, scope = model._series.keys, params.scope
+    wanted = ((keys["code"] == scope.component_parameter_code)
+              & (keys["chemistry"] == scope.pack_level_key))
+    draws = model.mass_draws_at(float(capacity))[wanted.to_numpy()]
+    subset = keys[wanted].reset_index(drop=True)
+    out: dict[str, np.ndarray] = {}
+    for component, positions in subset.groupby("component").indices.items():
+        row = draws[positions].sum(axis=0)
+        if row.max() > row.min():
+            out[str(component)] = row
+    if out:
+        out["ALL SHARED PARTS"] = np.sum(list(out.values()), axis=0)
+    return out
+
+
+def draw_distribution(series: dict[str, np.ndarray], title: str, xlabel: str,
+                      params, colours: dict[str, str] | None = None):
+    """Several distributions of the same quantity, overlaid, in kg."""
     if not series:
         return None
     low = min(np.percentile(v, 0.2) for v in series.values())
@@ -702,7 +698,7 @@ def draw_distribution(series: dict[str, np.ndarray], title: str, xlabel: str, pa
     order = sorted(series, key=lambda c: series[c].mean())
     for chemistry in order:
         row = series[chemistry]
-        colour = params.scenarios.workbook_chemistry_colours[chemistry]
+        colour = (colours or params.scenarios.workbook_chemistry_colours)[chemistry]
         curve = histogram_density(row, grid)
         style = "--" if chemistry in UNKNOWN_COMPOSITION else "-"
         axes.fill_between(grid, 0, curve, color=colour, alpha=0.22, linewidth=0)
@@ -949,11 +945,6 @@ def main(argv: list[str] | None = None) -> int:
              # own capacity -- and saying so is better than leaving them blank.
              "capacity_is_projected": False, "capacity_source": "workbook anchor"}
             for a in anchors for y in years])
-        if chemistry in params.technology.chemistry_energy_density:
-            capacities["pack_mass_kg_implied"] = [
-                row.capacity_kwh_nominal * 1000.0
-                / pack_density(params, chemistry, float(row.year))
-                for row in capacities.itertuples()]
         built = build_unknown_rows(model, params, capacities, chemistry)
 
         rows = pd.DataFrame({
@@ -1007,6 +998,28 @@ def main(argv: list[str] | None = None) -> int:
             drawn += 1
 
     capacity = params.export.distribution_figure_capacity_kwh
+
+    # The parts every battery shares, which have ONE distribution rather than one
+    # per chemistry: frame, thermal conductor, module enclosures, cables. Drawn
+    # per component and as their total, so it is visible which one carries the
+    # uncertainty.
+    shared = shared_pack_draws(model, params, capacity)
+    if shared:
+        palette = plt.get_cmap("tab10")
+        shared_colours = {name: ("#1c1c1c" if name.startswith("ALL")
+                                 else palette(i % 10))
+                          for i, name in enumerate(shared)}
+        figure = draw_distribution(
+            shared,
+            f"Parts every battery shares, at {capacity:.0f} kWh \u2014 identical "
+            f"whatever chemistry is inside\n{params.monte_carlo.n_draws:,} draws; "
+            "solid line the mode, dotted the 2.5 and 97.5 percentiles",
+            "mass in one car [kg]", params, colours=shared_colours)
+        if figure is not None:
+            save_figure(figure, params,
+                        f"distribution_shared_parts_{capacity:.0f}kWh.png")
+            drawn += 1
+
     figure = draw_distribution(
         collect_draws(model, params, capacity, None),
         f"Whole battery mass at {capacity:.0f} kWh \u2014 every chemistry\n"
