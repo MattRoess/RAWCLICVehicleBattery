@@ -43,7 +43,6 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
 from matplotlib.ticker import MaxNLocator  # noqa: E402
 import numpy as np  # noqa: E402
-import pandas as pd  # noqa: E402
 
 from src.ev_details import EVDetails, EVDetailsError  # noqa: E402
 from src.params_schema import ParameterError, current  # noqa: E402

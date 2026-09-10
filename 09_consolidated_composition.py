@@ -54,7 +54,7 @@ if str(PROJECT_ROOT) not in sys.path:
 import numpy as np  # noqa: E402
 import pandas as pd  # noqa: E402
 
-from src.composition import CompositionError, CompositionModel, approximate_mode  # noqa: E402
+from src.composition import CompositionError, CompositionModel  # noqa: E402
 from src.params_schema import ParameterError, current  # noqa: E402
 
 # The input workbook's own column order, then what this script adds.
@@ -68,16 +68,6 @@ LEVEL_CODES = {"component": "component_parameter_code",
                "material": "material_parameter_code",
                "element": "element_parameter_code"}
 
-
-def statistics_from_draws(draws: np.ndarray) -> dict[str, np.ndarray]:
-    """The six the house schema carries, all from the same draws."""
-    quartiles = np.percentile(draws, [2.5, 50, 97.5], axis=1)
-    return {"meanValue": draws.mean(axis=1),
-            "medianValue": quartiles[1],
-            "modeValue": approximate_mode(draws),
-            "STD": draws.std(axis=1, ddof=1),
-            "p025": quartiles[0],
-            "p975": quartiles[2]}
 
 
 def rows_for(model: CompositionModel, params, chemistry: str, capacity: float
@@ -139,7 +129,6 @@ def main(argv: list[str] | None = None) -> int:
     model = CompositionModel(params)
     anchors = [float(c) for c in model._series.capacities]
     years = params.export_years()
-    base_year = float(params.export.density_base_year)
     scaled = ["Value", "min_value", "max_value", "meanValue", "medianValue",
               "modeValue", "STD", "p025", "p975"]
 
@@ -154,12 +143,15 @@ def main(argv: list[str] | None = None) -> int:
 
     print(f"{params.monte_carlo.n_draws:,} draws | anchors {[int(a) for a in anchors]} "
           f"| years {years[0]}-{years[-1]} step {params.export.export_year_step} "
-          f"| density base {int(base_year)}")
+          f"| density base {params.export.density_base_year}")
 
     for chemistry in known:
         has_trajectory = chemistry in params.technology.chemistry_energy_density
-        base_density = (generator.pack_density(params, chemistry, base_year)
-                        if has_trajectory else None)
+        # generator.density_factor, not a second copy of the arithmetic: 06 and
+        # 09 disagreeing about this exact quantity is what made every figure
+        # flat after 2025.
+        def factor_for(year: float) -> float:
+            return generator.density_factor(params, chemistry, year)
         per_year = []
         for capacity in anchors:
             at_anchor = rows_for(model, params, chemistry, capacity)
@@ -175,9 +167,8 @@ def main(argv: list[str] | None = None) -> int:
             for year in years:
                 frame = at_anchor.copy()
                 frame["productionYear"] = year
-                if base_density is not None:
-                    factor = base_density / generator.pack_density(
-                        params, chemistry, float(year))
+                factor = factor_for(float(year))
+                if factor != 1.0:
                     for column in scaled:
                         frame[column] = pd.to_numeric(frame[column],
                                                       errors="coerce") * factor

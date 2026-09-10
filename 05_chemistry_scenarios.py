@@ -34,7 +34,6 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
 import numpy as np  # noqa: E402
-import pandas as pd  # noqa: E402
 
 from src.params_schema import ParameterError, current  # noqa: E402
 from src.scenarios import SCENARIO_NAMES, ChemistryScenarios, ScenarioError  # noqa: E402

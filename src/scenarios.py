@@ -176,18 +176,5 @@ class ChemistryScenarios:
                                  "extra_years": extra_years})
         return pd.DataFrame(rows)
 
-    def returning_band(self, scenario: str, last_year: int = 2070) -> pd.DataFrame:
-        """
-        The same, at both ends of the second-life duration range, so the spread
-        the assumption creates is visible instead of averaged away.
-        """
-        settings = self.params.second_life
-        frames = []
-        for extra in (settings.second_life_extra_years_min,
-                      settings.second_life_extra_years_max):
-            frames.append(self.returning_shares(scenario, extra_years=extra,
-                                                last_year=last_year))
-        return pd.concat(frames, ignore_index=True)
-
     def label(self, scenario: str) -> str:
         return self.settings.scenario_labels.get(scenario, scenario)
