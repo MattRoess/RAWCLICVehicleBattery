@@ -77,7 +77,11 @@ def draw(scenarios: ChemistryScenarios):
             ax.axvline(LAST_OBSERVED_YEAR, color="#8a3b3b", linewidth=1.0,
                        linestyle="--", zorder=6)
             if row == 0:
-                ax.set_title(group, fontsize=10, loc="left", color=INK)
+                # The segments themselves, not "small" / "medium" / "large":
+                # the group name says nothing about which cars it covers.
+                ax.set_title("car segment: "
+                             + " · ".join(settings.segment_groups[group]),
+                             fontsize=10, loc="left", color=INK)
             if column == 0:
                 ax.set_ylabel("share of new batteries [%]", fontsize=8)
             if row == len(SCENARIO_NAMES) - 1:
