@@ -177,7 +177,53 @@ class CompositionModel:
             "parameterCode": "code", "Value": "intensity",
         })
         rows = self._apply_density_override(rows)
+        rows = self._apply_element_share_override(rows)
         rows["mass_kg"] = rows["intensity"] * rows["kwh"]
+        return rows
+
+    def _apply_element_share_override(self, rows: pd.DataFrame) -> pd.DataFrame:
+        """
+        Set an element's mass to a stated share of its component's.
+
+        For a compound of known formula the share is not an estimate, it is
+        arithmetic: LiFePO4 is 4.40% lithium by mass whatever else is uncertain.
+        Where the workbook disagrees with the chemistry's own stoichiometry, the
+        stoichiometry wins.
+
+        Applied AFTER the density override, so the share is taken of the
+        component mass this project actually reports. Value, min_value and
+        max_value move together, for the reason given in the density override.
+        """
+        override = self.params.technology.element_share_of_component_override
+        if not override:
+            return rows
+
+        scope = self.params.scope
+        for chemistry, by_component in override.items():
+            for component, by_element in by_component.items():
+                for element, share in by_element.items():
+                    at_component = ((rows.chemistry == chemistry)
+                                    & (rows.component == component)
+                                    & (rows.code == scope.component_parameter_code))
+                    at_element = ((rows.chemistry == chemistry)
+                                  & (rows.component == component)
+                                  & (rows.element == element)
+                                  & (rows.code == scope.element_parameter_code))
+                    if not at_element.any():
+                        raise CompositionError(
+                            f"element_share_of_component_override names "
+                            f"{chemistry}/{component}/{element}, which has no "
+                            "element-level row in the workbook.")
+                    for capacity in sorted(rows.loc[at_element, "kwh"].unique()):
+                        whole = rows.loc[at_component & (rows.kwh == capacity),
+                                         "intensity"].sum()
+                        target = rows.index[at_element & (rows.kwh == capacity)]
+                        before = float(rows.loc[target, "intensity"].sum())
+                        if before <= 0:
+                            continue
+                        factor = (share * whole) / before
+                        for column in ("intensity", "min_value", "max_value"):
+                            rows.loc[target, column] = rows.loc[target, column] * factor
         return rows
 
     def _apply_density_override(self, rows: pd.DataFrame) -> pd.DataFrame:

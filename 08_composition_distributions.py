@@ -2,32 +2,34 @@
 08_composition_distributions.py
 ===============================
 
-The Monte Carlo distributions themselves, not a summary of them.
+How much of a material a battery holds, and how sure we are -- compared across
+chemistries, which is the comparison that carries information.
 
     ./.venv/bin/python 00_parameters.py                    # first, always
     ./.venv/bin/python 08_composition_distributions.py
 
-Writes one FULL-SIZE figure per chemistry to paths.output_dir. One chemistry per
-figure on purpose: a 9x14 grid of thumbnails is unreadable, and the shape of a
-distribution is the whole point here.
+ONE FULL-SIZE FIGURE PER MATERIAL, plus one for the whole pack. Each shows every
+chemistry's distribution of that quantity, overlaid, in absolute kg on a linear
+axis, at one capacity anchor.
 
-WHAT EACH FIGURE SHOWS. A ridgeline: one filled density per element, drawn from
-the 200,000 draws at one capacity anchor, each normalised to its own peak so
-that elements three orders of magnitude apart in mass can share an axis and
-still be compared by SHAPE.
+WHAT THE EARLIER VERSION GOT WRONG, and why this is not that. It drew one
+ridgeline per chemistry with an element per row, on an axis relative to each
+element's own mode. Every element in this model shares ONE Monte Carlo factor
+per series, so every one of those curves was the same +/-7.8% triangle: nine
+curves carrying a single fact, with the only thing that actually differed --
+the magnitude -- divided out. Comparing chemistries at the same quantity keeps
+the magnitude, and the differences between chemistries are real.
 
-  solid line    the mode -- the most likely value, and the statistic the 200,000
-                draws were actually bought for. Against the triangular factor's
-                known mode it is recovered to 0.44% at 200,000 draws and only
-                1.57% at 20,000
-  dotted lines  the 2.5 and 97.5 percentiles
-  x axis        mass relative to that element's own mode, so a wide distribution
-                and a narrow one are told apart at a glance
+  solid line   the mode, the statistic the 200,000 draws were bought for
+  dotted       the 2.5 and 97.5 percentiles of that chemistry
+  filled       the distribution, scaled to its own peak so a narrow one and a
+               wide one are both visible -- the HEIGHT carries no meaning, the
+               position and width carry all of it
 
-WHY RELATIVE AND NOT ABSOLUTE. A pack holds ~120 kg of iron and ~0.2 kg of
-lithium. On a shared absolute axis the lithium is a vertical line at zero. What
-matters here is not how much there is -- the other figures say that -- but how
-UNCERTAIN each one is, and that only shows up relative to its own value.
+A chemistry that does not contain the material at all is absent, not drawn at
+zero. Sodium and solid-state appear only where the packaging holds the material:
+their cathode, anode and electrolyte are unknownBatteryMaterial, so they are on
+the copper and aluminium figures and not on lithium or nickel.
 """
 
 from __future__ import annotations
@@ -47,15 +49,16 @@ import numpy as np  # noqa: E402
 from src.composition import CompositionError, CompositionModel, approximate_mode  # noqa: E402
 from src.params_schema import ParameterError, current  # noqa: E402
 
+UNKNOWN_COMPOSITION = ("Na_ion", "solid_state")
 
 
-def density(values: np.ndarray, grid: np.ndarray, bins: int = 240) -> np.ndarray:
+def density(values: np.ndarray, grid: np.ndarray, bins: int = 200) -> np.ndarray:
     """
-    A histogram, smoothed just enough to read as a curve.
+    A histogram on a shared grid, scaled to its own peak.
 
-    Deliberately NOT a kernel density estimate: a KDE picks a bandwidth, and a
-    bandwidth is a claim about smoothness that nobody here has made. This is the
-    histogram the mode already comes from, interpolated onto a common grid.
+    Deliberately not a kernel density estimate: a KDE picks a bandwidth, and a
+    bandwidth is a claim about smoothness nobody here has made. This is the same
+    histogram the mode comes from.
     """
     counts, edges = np.histogram(values, bins=bins, density=True)
     centres = 0.5 * (edges[:-1] + edges[1:])
@@ -64,58 +67,65 @@ def density(values: np.ndarray, grid: np.ndarray, bins: int = 240) -> np.ndarray
     return np.interp(grid, centres, counts, left=0.0, right=0.0)
 
 
-def draw_chemistry(model: CompositionModel, chemistry: str, capacity: float,
-                   params):
-    """One chemistry's element distributions, stacked as a ridgeline."""
-    elements, masses = model.element_draws_at(capacity, chemistry=chemistry)
-    live = [(element, row) for element, row in zip(elements, masses)
-            if row.max() > row.min()]
-    if not live:
-        return None
-    live.sort(key=lambda pair: pair[1].mean(), reverse=True)
-
-    colour = params.scenarios.workbook_chemistry_colours[chemistry]
-    height = max(6.5, 1.05 * len(live) + 2.2)
-    figure, axes = plt.subplots(figsize=(13, height))
-    grid = np.linspace(0.80, 1.20, 400)
-    step = 1.0
-
-    for index, (element, row) in enumerate(live):
-        mode = float(approximate_mode(row[None, :])[0])
-        if mode <= 0:
+def collect(model: CompositionModel, params, capacity: float, element: str | None
+            ) -> dict[str, np.ndarray]:
+    """Every chemistry's draws for one element, or for the whole pack."""
+    out: dict[str, np.ndarray] = {}
+    known = sorted(set(model._series.keys["chemistry"])
+                   - {params.scope.pack_level_key})
+    for chemistry in known:
+        try:
+            elements, masses = model.element_draws_at(capacity, chemistry=chemistry)
+        except CompositionError:
             continue
-        relative = row / mode
-        curve = density(relative, grid)
-        base = index * step
-        axes.fill_between(grid, base, base + curve * 0.92, color=colour,
-                          alpha=0.55, linewidth=0)
-        axes.plot(grid, base + curve * 0.92, color=colour, linewidth=1.3)
-        axes.plot([1.0, 1.0], [base, base + 0.92], color="0.15", linewidth=1.6)
-        low, high = np.percentile(relative, [2.5, 97.5])
-        for edge in (low, high):
-            axes.plot([edge, edge], [base, base + 0.55], color="0.35",
-                      linewidth=0.9, linestyle=":")
-        axes.text(0.795, base + 0.30, element, ha="right", va="center",
-                  fontsize=11.5, fontweight="bold")
-        axes.text(1.205, base + 0.30,
-                  f"{mode:8.2f} kg   ±{100 * (high - low) / 2:4.1f}%",
-                  ha="left", va="center", fontsize=9.5, color="0.35",
-                  family="monospace")
+        if element is None:
+            row = masses.sum(axis=0)
+        else:
+            if element not in elements:
+                continue
+            row = masses[elements.index(element)]
+        if row.max() <= row.min():
+            continue                       # a fixed zero is not a distribution
+        out[chemistry] = row
+    return out
 
-    axes.set_xlim(0.74, 1.30)
-    axes.set_ylim(-0.35, len(live) * step + 0.5)
-    axes.set_yticks([])
-    axes.set_xticks([0.85, 0.90, 0.95, 1.00, 1.05, 1.10, 1.15])
-    axes.set_xlabel("mass relative to that element's own mode", fontsize=11)
-    axes.set_title(
-        f"{chemistry} — element mass distributions at {capacity:.0f} kWh\n"
-        f"{params.monte_carlo.n_draws:,} draws; solid line the mode, dotted the "
-        "2.5 and 97.5 percentiles; each curve scaled to its own peak",
-        fontsize=12.5)
+
+def draw(series: dict[str, np.ndarray], title: str, xlabel: str, params):
+    """Every chemistry's distribution of one quantity, overlaid, in kg."""
+    if not series:
+        return None
+    low = min(np.percentile(v, 0.2) for v in series.values())
+    high = max(np.percentile(v, 99.8) for v in series.values())
+    pad = 0.06 * (high - low)
+    grid = np.linspace(low - pad, high + pad, 500)
+
+    figure, axes = plt.subplots(figsize=(13.5, 8))
+    order = sorted(series, key=lambda c: series[c].mean())
+    for chemistry in order:
+        row = series[chemistry]
+        colour = params.scenarios.workbook_chemistry_colours[chemistry]
+        curve = density(row, grid)
+        style = "--" if chemistry in UNKNOWN_COMPOSITION else "-"
+        axes.fill_between(grid, 0, curve, color=colour, alpha=0.22, linewidth=0)
+        axes.plot(grid, curve, color=colour, linewidth=2.0, linestyle=style,
+                  label=chemistry)
+        mode = float(approximate_mode(row[None, :])[0])
+        axes.plot([mode, mode], [0, 1.02], color=colour, linewidth=1.4, alpha=0.9)
+        for edge in np.percentile(row, [2.5, 97.5]):
+            axes.plot([edge, edge], [0, 0.30], color=colour, linewidth=1.0,
+                      linestyle=":", alpha=0.9)
+
+    axes.set_xlabel(xlabel, fontsize=11)
+    axes.set_ylabel("relative frequency (each scaled to its own peak)", fontsize=10.5)
+    axes.set_title(title, fontsize=12.5)
+    axes.set_ylim(0, 1.16)
+    axes.grid(True, axis="x", linestyle="--", alpha=0.3)
+    axes.set_axisbelow(True)
     for side in ("top", "right", "left"):
         axes.spines[side].set_visible(False)
-    axes.grid(True, axis="x", linestyle="--", alpha=0.28)
-    axes.set_axisbelow(True)
+    axes.set_yticks([])
+    axes.legend(frameon=False, fontsize=10, ncol=3, loc="upper center",
+                bbox_to_anchor=(0.5, -0.10))
     figure.tight_layout()
     return figure
 
@@ -131,31 +141,47 @@ def main(argv: list[str] | None = None) -> int:
     capacity = params.export.distribution_figure_capacity_kwh
     anchors = [float(c) for c in model._series.capacities]
     if capacity not in anchors:
-        print(f"export.distribution_figure_capacity_kwh is {capacity}, which is "
-              f"not one of the workbook's anchors {anchors}. The per-draw arrays "
-              "exist only at anchors.", file=sys.stderr)
+        print(f"export.distribution_figure_capacity_kwh is {capacity}, not one of "
+              f"the anchors {anchors}; the per-draw arrays exist only at anchors.",
+              file=sys.stderr)
         return 2
 
-    known = sorted(set(model._series.keys["chemistry"])
-                   - {params.scope.pack_level_key})
-    print(f"{params.monte_carlo.n_draws:,} draws at {capacity:.0f} kWh")
+    draws = params.monte_carlo.n_draws
+    print(f"{draws:,} draws at {capacity:.0f} kWh\n")
     written = 0
-    for chemistry in known:
-        try:
-            figure = draw_chemistry(model, chemistry, capacity, params)
-        except CompositionError as error:
-            print(f"  {chemistry}: {error}")
-            continue
-        if figure is None:
-            print(f"  {chemistry}: no element varies -- skipped")
-            continue
+
+    figure = draw(collect(model, params, capacity, None),
+                  f"Whole battery mass at {capacity:.0f} kWh — every chemistry\n"
+                  f"{draws:,} draws; solid line the mode, dotted the 2.5 and 97.5 "
+                  "percentiles",
+                  "battery mass in one car [kg]", params)
+    if figure is not None:
         path = params.output_path(PROJECT_ROOT,
-                                  f"distribution_{chemistry}_{capacity:.0f}kWh.png")
+                                  f"distribution_total_{capacity:.0f}kWh.png")
         figure.savefig(path, dpi=params.drawing.output_dpi, bbox_inches="tight",
                        facecolor="white")
         plt.close(figure)
-        print(f"  {chemistry:20s} -> {path.name}")
+        print(f"  {'whole pack':12s} -> {path.name}")
         written += 1
+
+    for element in params.export.crm_elements:
+        series = collect(model, params, capacity, element)
+        figure = draw(series,
+                      f"{element} at {capacity:.0f} kWh — every chemistry that "
+                      f"contains it\n{draws:,} draws; solid line the mode, dotted "
+                      "the 2.5 and 97.5 percentiles",
+                      f"{element} in one car [kg]", params)
+        if figure is None:
+            print(f"  {element:12s} no chemistry claims it -- skipped")
+            continue
+        path = params.output_path(PROJECT_ROOT,
+                                  f"distribution_{element}_{capacity:.0f}kWh.png")
+        figure.savefig(path, dpi=params.drawing.output_dpi, bbox_inches="tight",
+                       facecolor="white")
+        plt.close(figure)
+        print(f"  {element:12s} -> {path.name}   ({len(series)} chemistries)")
+        written += 1
+
     print(f"\nSaved {written} figures to {params.paths.output_dir}/")
     return 0
 

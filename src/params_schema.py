@@ -822,6 +822,14 @@ class ExportParams:
     # pack mass. The files carry both levels precisely so that gap is visible
     # rather than inferred.
     # SAFE TO CHANGE: yes.
+    # The critical raw materials, for the CRM figures in 07. Copper is not on
+    # the EU CRM list itself but is on the strategic list and is the number the
+    # sodium and 800V questions turn on, so it belongs here.
+    # SAFE TO CHANGE: yes, to any element the workbook resolves.
+    # Carbon is deliberately NOT here: graphite is on the EU list, but it is the
+    # anode's bulk material rather than a scarcity question in this model.
+    crm_elements: tuple[str, ...] = ("Li", "Co", "Ni", "Mn", "Cu", "Si")
+
     # Which segment the over-time figures (07) draw. One segment, because these
     # are full-size single-element figures rather than a grid nobody can read.
     # SAFE TO CHANGE: yes, to any segment the composition files contain.
@@ -1143,6 +1151,27 @@ class TechnologyParams:
     cell_density_override_wh_per_kg: dict[str, float] = field(default_factory=lambda: {
         "battLiMFP_subsub": 270.0,
     })
+
+    # WHERE AN ELEMENT'S SHARE OF ITS COMPONENT IS NOT BELIEVED, as a fraction
+    # of that component's mass: chemistry -> component -> element -> share.
+    #
+    # battLiMFP's lithium is 3.45% of its cathode where every other chemistry
+    # lands on its own stoichiometry -- LFP 4.59% against 4.40% for LiFePO4, the
+    # three NMCs 7.29-7.37% against 7.19%, NCA 7.40%. LMFP cannot be the
+    # exception: LiMnxFe1-xPO4 carries the same lithium per formula unit as
+    # LiFePO4, and manganese (54.94) and iron (55.85) weigh almost the same, so
+    # its share must be LFP's. 3.45% is 22% short.
+    #
+    # This is the SECOND defect in battLiMFP, after its energy density, from the
+    # same count_value = 1, DQS = 2 source. Both are corrected here rather than
+    # in the workbook, so a WP3 revision can simply remove them.
+    # SAFE TO CHANGE: yes. Element rows do not have to sum to their component --
+    # the workbook resolves only part of most components at element level -- so
+    # setting one share does not disturb the others.
+    element_share_of_component_override: dict[str, dict[str, dict[str, float]]] = field(
+        default_factory=lambda: {
+            "battLiMFP_subsub": {"cathodeActiveMaterial": {"Li": 0.0440}},
+        })
 
     chemistry_energy_density: dict[str, dict] = field(default_factory=lambda: {
         # 400 Wh/kg is where solid-state cells ARE, not where they arrive in 2040.

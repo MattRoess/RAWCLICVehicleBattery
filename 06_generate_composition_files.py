@@ -154,6 +154,18 @@ def build_rows(model: CompositionModel, params, capacities: pd.DataFrame,
             table.insert(0, "segment", entry.segment)
             table["capacity_is_projected"] = entry.capacity_is_projected
             table["capacity_source"] = entry.capacity_source
+            # THE CELLS IMPROVE, SO THE MASS FALLS. The workbook's composition is
+            # true in export.density_base_year; in any other year the same kWh
+            # needs less cell, and less pack hardware around a smaller stack.
+            # Applied HERE as well as in 09 because these two files are the same
+            # claim in two shapes -- without it 09 had nickel falling 23% by 2050
+            # while these said it never moved, and the figures drawn from these
+            # showed a flat line that was simply wrong.
+            factor = density_factor(params, chemistry, float(entry.year))
+            if factor != 1.0:
+                for column in [c for c in table.columns
+                               if c.startswith("mass_") or c == "kg_per_kwh"]:
+                    table[column] = table[column] * factor
             frames.append(table)
 
     rows = pd.concat(frames, ignore_index=True)
@@ -289,6 +301,22 @@ def pack_density(params, chemistry: str, year: float) -> float:
     if entry["basis"] == "cell":
         value *= params.technology.cell_to_pack_ratio[chemistry]
     return value
+
+
+def density_factor(params, chemistry: str, year: float) -> float:
+    """
+    How much lighter the same kWh is in `year` than in the base year.
+
+    One over the density gain: a chemistry that is 30% more energy dense needs
+    1/1.3 = 0.77 of the material for the same energy. Chemistries with no
+    trajectory return 1.0 and are untouched.
+
+    Shared by 06 and 09 so the two cannot disagree about the same quantity.
+    """
+    if chemistry not in params.technology.chemistry_energy_density:
+        return 1.0
+    base = pack_density(params, chemistry, float(params.export.density_base_year))
+    return base / pack_density(params, chemistry, float(year))
 
 
 def build_unknown_rows(model: CompositionModel, params, capacities: pd.DataFrame,
