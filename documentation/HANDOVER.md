@@ -4,7 +4,8 @@ Written 2026-09-10, superseding the earlier 09-10 version. For resuming on the
 **office Mac on Monday 2026-09-14**.
 
 State verified against the repository and against runs made today, not
-remembered. For the methods and the reasoning, read
+remembered. For how each chemistry develops over time, read
+[`CHEMISTRY_OVER_TIME.md`](CHEMISTRY_OVER_TIME.md). For the methods and the reasoning, read
 [`METHODOLOGY.md`](METHODOLOGY.md).
 
 **Read §0 first.** It is how to work on this project, and it cost the most to

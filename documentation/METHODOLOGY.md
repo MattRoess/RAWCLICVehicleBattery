@@ -1,5 +1,8 @@
 # Vehicle battery composition — what this project does, and what to trust in it
 
+> **How the chemistries develop over time**, and why the uncertainty band widens
+> with the year, is its own document: [`CHEMISTRY_OVER_TIME.md`](CHEMISTRY_OVER_TIME.md).
+
 **RAWCLICVehicleBattery** turns two data files into the battery-composition
 inputs for the RAWCLIC stock-and-flow model: what a battery is made of, for any
 capacity, any of nine chemistries, any vehicle segment, any year to 2070.
