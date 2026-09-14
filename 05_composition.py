@@ -552,14 +552,31 @@ UNKNOWN_COMPOSITION = ("Na_ion", "solid_state")
 
 
 
-def rows_for(model: CompositionModel, params, chemistry: str, capacity: float
-             ) -> pd.DataFrame:
-    """Every level at one anchor, in the workbook's shape, in kg, before the year."""
+def rows_for(model: CompositionModel, params, chemistry: str, capacity: float,
+             *, year_factor_draws: np.ndarray | None = None,
+             year_factor: float = 1.0) -> pd.DataFrame:
+    """
+    Every level at one anchor, in the workbook's shape, in kg, FOR ONE YEAR.
+
+    The year's improvement is handed to `weights_at` as DRAWS, so it multiplies
+    each draw before any percentile is taken. Scaling the finished statistics by
+    a single number instead -- which is what this did until 2026-09-14 -- slides
+    the band without widening it: the CSV's p025/p975 stayed 15.5% of the
+    central in every year while the draws behind them widened to 22.1% by 2070.
+    The improvement's own uncertainty was simply absent from the file.
+
+    `year_factor` is the central's multiplier and is deliberately the MODE of
+    the improvement, not the mean of the draws. Value is a central estimate and
+    meanValue is a mean; at 2070 they differ by 2.1% because the triangular is
+    skewed, and that is the distribution being reported rather than an error.
+    """
     scope = params.scope
     frames = []
     for level, attribute in LEVEL_CODES.items():
         try:
-            table = model.weights_at(capacity, chemistry=chemistry, level=level)
+            table = model.weights_at(capacity, chemistry=chemistry, level=level,
+                                     year_factor_draws=year_factor_draws,
+                                     year_factor=year_factor)
         except CompositionError:
             continue                       # not every level resolves for every chemistry
         band = params.monte_carlo
@@ -994,9 +1011,6 @@ def main(argv: list[str] | None = None) -> int:
 
     anchors = [float(c) for c in model._series.capacities]
     years = params.export_years()
-    scaled = ["Value", "min_value", "max_value", "meanValue", "medianValue",
-              "modeValue", "STD", "p025", "p975"]
-
     directory = PROJECT_ROOT / params.export.consolidated_output_dir
     directory.mkdir(parents=True, exist_ok=True)
     known = sorted(set(model._series.keys["chemistry"]) - {params.scope.pack_level_key})
@@ -1032,8 +1046,6 @@ def main(argv: list[str] | None = None) -> int:
             return improvement_factor(params, year)
         per_year = []
         for capacity in anchors:
-            at_anchor = apply_pack_rules_to_workbook(
-                rows_for(model, params, chemistry, capacity), params, chemistry)
             # MASS draws, in kg, THROUGH THE PACK RULES -- not fractions taken
             # straight off the model. The rules are keyed on (component,
             # element), so they have to be applied before the sum to elements;
@@ -1049,14 +1061,17 @@ def main(argv: list[str] | None = None) -> int:
                 (directory / f"{stem}_elements.txt").write_text("\n".join(elements))
                 n_draw_files += 1
 
+            # Built PER YEAR from the draws, not copied and scaled. The
+            # improvement has to reach the statistics as a distribution or the
+            # band it carries never appears in them.
             for year in years:
-                frame = at_anchor.copy()
+                frame = apply_pack_rules_to_workbook(
+                    rows_for(model, params, chemistry, capacity,
+                             year_factor_draws=improvement_factor_draws(
+                                 params, float(year)),
+                             year_factor=factor_for(float(year))),
+                    params, chemistry)
                 frame["productionYear"] = year
-                factor = factor_for(float(year))
-                if factor != 1.0:
-                    for column in scaled:
-                        frame[column] = pd.to_numeric(frame[column],
-                                                      errors="coerce") * factor
                 per_year.append(frame)
 
         rows = pd.concat(per_year, ignore_index=True)
