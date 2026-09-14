@@ -467,13 +467,46 @@ class CompositionModel:
             raise CompositionError(
                 f"no element rows for chemistry {chemistry!r}.")
 
-        draws = self.mass_draws_at(float(capacity_kwh))[wanted.to_numpy()]
-        subset = keys[wanted].reset_index(drop=True)
+        subset, draws = self.component_element_draws_at(
+            capacity_kwh, chemistry=chemistry)
         elements, rows = [], []
         for element, positions in subset.groupby("element").indices.items():
             elements.append(str(element))
             rows.append(draws[positions].sum(axis=0))
         return elements, np.vstack(rows)
+
+    def component_element_draws_at(self, capacity_kwh: float, *, chemistry: str
+                                   ) -> tuple[pd.DataFrame, np.ndarray]:
+        """
+        The same draws as `element_draws_at`, but BEFORE the sum over components.
+
+        Returns (keys, masses) where `keys` has one row per (component, element)
+        and `masses` is (n_rows, n_draws) in kg.
+
+        WHY THE COMPONENT DIMENSION HAS TO SURVIVE. All three pack rules --
+        the module-enclosure split, the structure scaling and the voltage
+        copper scaling -- are keyed on (component, element). Summed to elements
+        first, none of them can be applied, which is exactly how the persisted
+        draw arrays came to disagree with the consolidated CSVs by 9.9
+        percentage points on iron and 5.8 on aluminium: the CSVs went through
+        `apply_pack_rules`, the arrays never could.
+
+        `element_draws_at` is this method plus a sum, so the two cannot drift.
+        """
+        keys, scope = self._series.keys, self.params.scope
+        known = set(keys["chemistry"]) - {scope.pack_level_key}
+        if chemistry not in known:
+            raise CompositionError(
+                f"unknown chemistry {chemistry!r}. The workbook has: {sorted(known)}")
+
+        wanted = ((keys["code"] == scope.element_parameter_code)
+                  & keys["chemistry"].isin([chemistry, scope.pack_level_key]))
+        if not wanted.any():
+            raise CompositionError(
+                f"no element rows for chemistry {chemistry!r}.")
+
+        draws = self.mass_draws_at(float(capacity_kwh))[wanted.to_numpy()]
+        return keys[wanted].reset_index(drop=True), draws
 
     def weights_at(self, capacity_kwh: float, *, chemistry: str,
                    level: str = "component", aggregate_elements: bool = False,

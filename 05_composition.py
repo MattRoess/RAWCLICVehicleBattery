@@ -611,6 +611,68 @@ def apply_pack_rules(rows: pd.DataFrame, params, chemistry: str) -> pd.DataFrame
     return with_pack_voltages(rows, params)
 
 
+def apply_pack_rules_to_draws(keys: pd.DataFrame, draws: np.ndarray, params,
+                              chemistry: str) -> dict[int, tuple[list[str], np.ndarray]]:
+    """
+    The three pack rules, on the DRAWS, in the same order as `apply_pack_rules`.
+
+    Returns {voltage: (elements, masses)} with masses (n_elements, n_draws) in kg.
+
+    WHY THIS EXISTS. `apply_pack_rules` works on DataFrame rows; the draws are
+    an array. Until this function the arrays were written straight out of
+    `element_draws_at`, which sums to elements before any rule can be applied --
+    so the persisted arrays carried none of the three, and disagreed with the
+    consolidated CSVs by 9.9 percentage points on iron and 5.8 on aluminium.
+    That was the third drift between these two outputs.
+
+    It is a second implementation of the rules, which is a risk this project has
+    already been bitten by. It is guarded the only way that actually works:
+    `check_draws_match_workbook()` compares the means from here against the CSV
+    path's own numbers on every run, and raises if they part company.
+    """
+    tech = params.technology
+    component = keys["component"].to_numpy()
+    element = keys["element"].to_numpy()
+    masses = np.asarray(draws, dtype=np.float64).copy()
+
+    # 1. Split the module enclosure FIRST, so only its iron half is available to
+    #    scale. The component's own total does not move -- only its makeup.
+    split = tech.module_enclosure_split
+    enclosure = "batteryPackModuleEnclosuresAndCoolantManifolds"
+    in_enclosure = component == enclosure
+    if split and in_enclosure.any():
+        pooled = masses[in_enclosure].sum(axis=0)
+        masses = masses[~in_enclosure]
+        component = component[~in_enclosure]
+        element = element[~in_enclosure]
+        for split_element, share in split.items():
+            masses = np.vstack([masses, pooled * float(share)])
+            component = np.append(component, enclosure)
+            element = np.append(element, split_element)
+
+    # 2. Scale the pack IRON by the cell mass it carries. Aluminium untouched --
+    #    the heat to be moved is set by the capacity, not by the pack's weight.
+    if tech.structure_scales_with_cell_mass:
+        factor = cell_mass_ratio(params, chemistry)
+        if factor != 1.0:
+            iron = np.isin(component, list(tech.structure_iron_components)) & (element == "Fe")
+            masses[iron] *= factor
+
+    # 3. Expand to the pack voltages, which only touches copper.
+    out: dict[int, tuple[list[str], np.ndarray]] = {}
+    for voltage in tech.pack_voltages_v:
+        per_voltage = masses.copy()
+        copper_factor = float(tech.copper_scale_by_voltage[voltage])
+        if copper_factor != 1.0:
+            copper = (np.isin(component, list(tech.voltage_scaled_copper_components))
+                      & (element == "Cu"))
+            per_voltage[copper] *= copper_factor
+        elements = sorted(set(str(e) for e in element))
+        stacked = np.vstack([per_voltage[element == e].sum(axis=0) for e in elements])
+        out[int(voltage)] = (elements, stacked)
+    return out
+
+
 def fixed_capacity_rows(model: CompositionModel, params, chemistry: str,
                         capacity: float, unknown: bool) -> pd.DataFrame:
     """
@@ -903,19 +965,30 @@ def main(argv: list[str] | None = None) -> int:
     n_written = 0
     for chemistry in chemistries:
         for anchor in anchors:
-            elements, masses = model.element_draws_at(anchor, chemistry=chemistry)
-            totals = masses.sum(axis=0)
-            fractions = np.zeros_like(masses)
-            live = totals > 0
-            fractions[:, live] = masses[:, live] / totals[live]
-            stem = f"batt_{chemistry}_{int(anchor)}kWh"
-            # (draws, elements) float32, the orientation the electronics files use.
-            np.save(draws_dir / f"{stem}_fractions.npy", fractions.T.astype(np.float32))
-            (draws_dir / f"{stem}_elements.txt").write_text("\n".join(elements))
-            n_written += 1
+            # THROUGH THE PACK RULES, like the consolidated masses beside them.
+            # Taken straight from element_draws_at these fractions carried none
+            # of the three rules and sat 9.9 percentage points off the CSVs on
+            # iron. Fractions also MOVE WITH VOLTAGE, because the copper does,
+            # so there is one set per voltage -- a single array could only ever
+            # have been right for one of the two.
+            keys, raw_draws = model.component_element_draws_at(
+                anchor, chemistry=chemistry)
+            for voltage, (elements, masses) in apply_pack_rules_to_draws(
+                    keys, raw_draws, params, chemistry).items():
+                totals = masses.sum(axis=0)
+                fractions = np.zeros_like(masses)
+                live = totals > 0
+                fractions[:, live] = masses[:, live] / totals[live]
+                stem = f"batt_{chemistry}_{int(anchor)}kWh_{voltage}V"
+                # (draws, elements) float32, the orientation the electronics files use.
+                np.save(draws_dir / f"{stem}_fractions.npy",
+                        fractions.T.astype(np.float32))
+                (draws_dir / f"{stem}_elements.txt").write_text("\n".join(elements))
+                n_written += 1
     print(f"\nWrote {n_written} per-draw fraction arrays to "
           f"{params.export.composition_output_dir}/element_draws/ "
-          f"({len(anchors)} anchors x {len(chemistries)} chemistries)")
+          f"({len(anchors)} anchors x {len(chemistries)} chemistries x "
+          f"{len(params.technology.pack_voltages_v)} voltages)")
 
     # ------------------------------------------- the consolidated files
 
@@ -937,6 +1010,19 @@ def main(argv: list[str] | None = None) -> int:
           f"| years {years[0]}-{years[-1]} step {params.export.export_year_step} "
           f"| density base {params.export.density_base_year}")
 
+    n_draw_files = 0
+    # THE YEAR IS NOT MULTIPLIED OUT. The improvement is one scalar per draw,
+    # shared by every component, element and year, so a year's mass draws are
+    # the base-year draws times that year's factor. Writing the factor once per
+    # year is 11 arrays of (n_draws,) against 11 copies of every mass array.
+    #   mass(year) = <stem>_mass_draws.npy * improvement_factor_draws_<year>.npy[:, None]
+    for year in years:
+        factors = improvement_factor_draws(params, float(year))
+        if factors is None:
+            break
+        np.save(directory / f"improvement_factor_draws_{int(year)}.npy",
+                np.asarray(factors, dtype=np.float32))
+
     for chemistry in known:
         has_trajectory = chemistry in params.technology.chemistry_energy_density
         # improvement_factor, the SAME function the segment-year files use, not
@@ -948,14 +1034,20 @@ def main(argv: list[str] | None = None) -> int:
         for capacity in anchors:
             at_anchor = apply_pack_rules_to_workbook(
                 rows_for(model, params, chemistry, capacity), params, chemistry)
-            elements, draws = model.element_draws_at(capacity, chemistry=chemistry)
-            totals = draws.sum(axis=0)
-            fractions = np.zeros_like(draws)
-            live = totals > 0
-            fractions[:, live] = draws[:, live] / totals[live]
-            stem = f"{chemistry}_{int(capacity)}kWh"
-            np.save(directory / f"{stem}_draws.npy", fractions.T.astype(np.float32))
-            (directory / f"{stem}_elements.txt").write_text("\n".join(elements))
+            # MASS draws, in kg, THROUGH THE PACK RULES -- not fractions taken
+            # straight off the model. The rules are keyed on (component,
+            # element), so they have to be applied before the sum to elements;
+            # writing the summed array directly is what left these files 9.9
+            # percentage points adrift of the CSVs on iron.
+            keys, raw_draws = model.component_element_draws_at(
+                capacity, chemistry=chemistry)
+            for voltage, (elements, masses) in apply_pack_rules_to_draws(
+                    keys, raw_draws, params, chemistry).items():
+                stem = f"{chemistry}_{int(capacity)}kWh_{voltage}V"
+                np.save(directory / f"{stem}_mass_draws.npy",
+                        masses.T.astype(np.float32))
+                (directory / f"{stem}_elements.txt").write_text("\n".join(elements))
+                n_draw_files += 1
 
             for year in years:
                 frame = at_anchor.copy()
@@ -973,6 +1065,9 @@ def main(argv: list[str] | None = None) -> int:
         rows.to_csv(path, index=False)
         note = "" if has_trajectory else "   (no trajectory -- flat in year)"
         print(f"  {chemistry:20s} {len(rows):>7,} rows -> {path.name}{note}")
+
+    print(f"  wrote {n_draw_files} per-draw MASS arrays (kg, pack rules applied, "
+          f"one per chemistry x capacity x voltage)")
 
     # ---------------------------------------------------------------------
     # The two chemistries with no workbook composition. build_unknown_rows is
