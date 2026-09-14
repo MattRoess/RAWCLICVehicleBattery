@@ -475,7 +475,8 @@ class CompositionModel:
             rows.append(draws[positions].sum(axis=0))
         return elements, np.vstack(rows)
 
-    def component_element_draws_at(self, capacity_kwh: float, *, chemistry: str
+    def component_element_draws_at(self, capacity_kwh: float, *, chemistry: str,
+                                   code: str | None = "element"
                                    ) -> tuple[pd.DataFrame, np.ndarray]:
         """
         The same draws as `element_draws_at`, but BEFORE the sum over components.
@@ -499,11 +500,16 @@ class CompositionModel:
             raise CompositionError(
                 f"unknown chemistry {chemistry!r}. The workbook has: {sorted(known)}")
 
-        wanted = ((keys["code"] == scope.element_parameter_code)
-                  & keys["chemistry"].isin([chemistry, scope.pack_level_key]))
+        # code=None returns EVERY level -- component, material and element --
+        # which is what a caller rescaling a whole component needs: a factor on
+        # a component has to reach its c-p row and its e-c rows alike, or the
+        # same part of the same battery disagrees with itself.
+        in_chemistry = keys["chemistry"].isin([chemistry, scope.pack_level_key])
+        wanted = in_chemistry if code is None else (
+            in_chemistry & (keys["code"] == scope.element_parameter_code))
         if not wanted.any():
             raise CompositionError(
-                f"no element rows for chemistry {chemistry!r}.")
+                f"no rows for chemistry {chemistry!r} at code {code!r}.")
 
         draws = self.mass_draws_at(float(capacity_kwh))[wanted.to_numpy()]
         return keys[wanted].reset_index(drop=True), draws

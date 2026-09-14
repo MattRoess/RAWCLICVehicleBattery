@@ -240,22 +240,61 @@ aluminium, collectors halved. The pack iron is weight-scaled like everything
 else (§5), which is why sodium's frame is *heavier* than LFP's at the same kWh
 and solid-state's is lighter.
 
-> **⚠️ Open: their cell packaging still scales with capacity, not weight.**
-> `batteryCellCasing` and `batteryCellSeparator` are inherited from LFP at equal
-> capacity — 6.3 kg and 3.2 kg at 60 kWh, identical to LFP's, even though a
-> sodium cell stack of the same kWh is heavier and bulkier. An asymmetric
-> triangular scaling factor was specified on 2026-09-14 —
-> **sodium 0.9 / 1.0 / 1.3, solid-state 0.7 / 0.8 / 1.1** — to be applied to the
-> cell packaging and the current collectors, multiplying on top of
-> `cell_mass_ratio`. **Not yet implemented**: see the note below.
+### How much the inherited packaging is trusted
 
-> **Why it is not a one-line change.** These two chemistries have no persisted
-> draws, and their rows are produced by scaling the base chemistry's *statistics*
-> by deterministic factors. Scaling a statistic by a constant is exact; scaling
-> it by a **drawn** factor is not — it slides the band without widening it, the
-> same defect that was fixed for the improvement on 2026-09-14. Applying a drawn
-> factor correctly means building their rows from the base chemistry's draws and
-> recomputing the statistics, which is a change to their modelling path.
+Their casing, separator, terminals and current collectors are taken from a base
+chemistry at the same capacity. Friday 2026-09-10 settled that the packaging is
+the base chemistry's **at its own mass** — two attempts to rescale it were worse,
+one giving sodium 343 kg of packaging on a 906 kg pack. But *"we took LFP's
+number"* is not the same as *"we know the number"*, and that doubt is now in the
+file as a distribution rather than absent from it.
+
+`technology.unknown_chemistry_mass_scale`, an asymmetric triangular:
+
+| chemistry | min | mode | max | mean |
+|---|---|---|---|---|
+| `Na_ion` | 0.9 | **1.0** | 1.3 | 1.067 |
+| `solid_state` | 0.7 | **0.8** | 1.1 | 0.867 |
+
+Asymmetric on purpose: a sodium cell stack of the same kWh is bulkier than the
+LFP one it is copied from, so the packaging can be a good deal heavier more
+easily than it can be lighter.
+
+**Sodium's mode is 1.0, so the central case is exactly Friday's decision** — the
+numbers do not move, only the spread around them appears. Solid-state's 0.8 is a
+claim that bipolar needs less packaging, with its own spread.
+
+It multiplies the components in
+`technology.unknown_chemistry_scaled_components` — casing, separator, terminals
+and both collectors — **in addition to** the existing rules. Not the pack iron,
+which already carries `cell_mass_ratio`; not the thermal conductor or cables,
+for the same reason aluminium is excluded from the structure scaling.
+
+Drawn **once per chemistry per Monte Carlo draw** and shared across every
+component, element and year, on its own random stream. One doubt about one
+inheritance, not an error per row.
+
+Measured at 60 kWh, 2020, 400 V — the band on what it touches, against what it
+does not:
+
+| component | `Na_ion` band | `solid_state` band |
+|---|---|---|
+| casing, separator, terminals, collectors | **33.6–33.9%** | **40.6–40.9%** |
+| frame, enclosures, thermal conductor, cables | 15.5% | 15.5% |
+
+> **The statistics for those rows are rebuilt from the draws, not scaled.** The
+> template's own factors — the halved collectors, the conductance factor — are
+> constants, and a percentile times a constant is a percentile. This factor is a
+> triangular, and a percentile times a random number is not a percentile of
+> anything: applying it to finished statistics would slide the band without
+> widening it, the same defect fixed for the improvement on 2026-09-14. See
+> `unknown_scaled_statistics()`.
+
+> **What is still open.** The active materials. Cathode, anode and electrolyte
+> are `unknownBatteryMaterial` with no number attached, for both chemistries.
+> That is a gap in the source, not in the model, and the numbers have to come
+> from literature or WP3. Neither chemistry has a persisted draw array either,
+> so a consumer wanting their distributions reads the statistics.
 
 ---
 

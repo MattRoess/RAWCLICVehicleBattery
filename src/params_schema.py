@@ -1377,6 +1377,52 @@ class TechnologyParams:
         },
     })
 
+    # ⚠️ HOW MUCH THE INHERITED PACKAGING IS TRUSTED, for the two chemistries
+    # with no composition of their own.
+    #
+    # Sodium and solid-state take their casing, separator, terminals and current
+    # collectors from a base chemistry at the same capacity. Friday 2026-09-10
+    # settled that the packaging is the base chemistry's AT ITS OWN MASS -- two
+    # attempts to rescale it were worse -- but "we took LFP's number" is not the
+    # same as "we know the number". This is that doubt, written as a
+    # distribution rather than left out of the file.
+    #
+    # min / mode / max of a TRIANGULAR, asymmetric on purpose: a sodium cell
+    # stack of the same kWh is bulkier than the LFP one it is copied from, so
+    # the packaging can be a good deal heavier more easily than it can be
+    # lighter. Sodium's mode is 1.0 -- the central case remains exactly Friday's
+    # decision, with the uncertainty around it now visible. Solid-state's is
+    # 0.8: bipolar needs less packaging, and that is a claim with its own spread.
+    #
+    # DRAWN ONCE PER MONTE CARLO DRAW AND SHARED across every component, element
+    # and year of that chemistry. It is one doubt about one inheritance, not an
+    # independent error per row -- drawn per row it would cancel in any sum and
+    # the total would come out falsely certain, the same reasoning as
+    # mass_improvement_2070 and the workbook's own factor_draws.
+    # SAFE TO CHANGE: yes. Set a chemistry to None to leave its packaging exact.
+    unknown_chemistry_mass_scale: dict[str, dict[str, float]] = field(
+        default_factory=lambda: {
+            "Na_ion": {"min": 0.9, "mode": 1.0, "max": 1.3},
+            "solid_state": {"min": 0.7, "mode": 0.8, "max": 1.1},
+        })
+
+    # WHICH COMPONENTS THE FACTOR ABOVE MULTIPLIES: the cell packaging and the
+    # current collectors -- the parts inherited from the base chemistry at equal
+    # capacity.
+    #
+    # Deliberately NOT the pack iron: the support frame and module enclosures
+    # already carry cell_mass_ratio, and this factor applies in addition to the
+    # existing rules rather than replacing any of them. Deliberately NOT the
+    # thermal conductor or the cables either -- the heat to be moved and the
+    # current to be carried are set by the capacity, not by what the packaging
+    # weighs, which is the same reason aluminium is excluded from the structure
+    # scaling.
+    # SAFE TO CHANGE: yes.
+    unknown_chemistry_scaled_components: tuple[str, ...] = (
+        "batteryCellCasing", "batteryCellSeparator", "batteryPackCellTerminals",
+        "currentCollectorAnode", "currentCollectorCathode",
+    )
+
     # Cell-to-pack packing ratio, used only when 'basis' above is 'cell'.
     # Today's workbook chemistries sit at 0.59-0.69; bipolar solid-state beats
     # that, needing no per-cell terminals and less module hardware. 0.85 was

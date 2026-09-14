@@ -393,6 +393,125 @@ def apply_material_overrides(rows: pd.DataFrame, params) -> pd.DataFrame:
     return pd.concat([keep, pd.DataFrame(expanded)], ignore_index=True) if expanded else keep
 
 
+_UNKNOWN_SCALE_DRAWS: dict[str, np.ndarray] = {}
+
+
+def unknown_scale_draws(params, chemistry: str) -> np.ndarray | None:
+    """
+    How much the inherited packaging is trusted, as draws -- shape (n_draws,).
+
+    ⚠️ DRAWN ONCE PER CHEMISTRY AND CACHED, exactly like `improvement_draws`.
+    It is one doubt about one inheritance -- "we took LFP's casing" is not "we
+    know the casing" -- not an independent error per row. Drawn per row it would
+    cancel in any sum and a pack total would come out falsely certain.
+    """
+    band = params.technology.unknown_chemistry_mass_scale.get(chemistry)
+    if band is None or not params.monte_carlo.enabled:
+        return None
+    if chemistry in _UNKNOWN_SCALE_DRAWS:
+        return _UNKNOWN_SCALE_DRAWS[chemistry]
+    mc = params.monte_carlo
+    # +2: neither the workbook's stream (+0) nor the improvement's (+1).
+    seed = mc.random_seed + 2 + (abs(hash(chemistry)) % 1000)
+    rng = np.random.default_rng(seed)
+    _UNKNOWN_SCALE_DRAWS[chemistry] = rng.triangular(
+        float(band["min"]), float(band["mode"]), float(band["max"]), size=mc.n_draws)
+    return _UNKNOWN_SCALE_DRAWS[chemistry]
+
+
+def unknown_scaled_statistics(model: CompositionModel, params, chemistry: str,
+                              capacity: float, year: float) -> pd.DataFrame:
+    """
+    Statistics for the inherited components, RECOMPUTED FROM DRAWS.
+
+    WHY THIS EXISTS. `build_unknown_rows` makes its numbers by multiplying the
+    base chemistry's statistics by deterministic factors, which is exact -- a
+    percentile times a constant is that percentile of the scaled variable. The
+    packaging-trust factor is NOT a constant, it is a triangular, and a
+    percentile times a random number is not a percentile of anything. Applying
+    it to the finished statistics would slide the band without widening it: the
+    same defect that left the improvement's uncertainty out of these files until
+    2026-09-14.
+
+    So the affected rows are rebuilt from the base chemistry's draws, carrying
+    the template's deterministic factors, the year's improvement and the trust
+    factor, and their statistics are taken from the result.
+    """
+    template = params.export.unknown_chemistry_template[chemistry]
+    scale = unknown_scale_draws(params, chemistry)
+    if scale is None:
+        return pd.DataFrame()
+    in_scope = set(params.technology.unknown_chemistry_scaled_components)
+
+    keys, draws = model.component_element_draws_at(
+        capacity, chemistry=template["based_on"], code=None)
+    keep = keys.component.isin(in_scope).to_numpy()
+    if not keep.any():
+        return pd.DataFrame()
+    keys = keys[keep].reset_index(drop=True)
+    draws = np.asarray(draws, dtype=np.float64)[keep].copy()
+
+    # The template's deterministic factors, keyed on (component, element) as in
+    # build_unknown_rows -- the halved collectors, the conductance factor.
+    #
+    # AND THE COMPONENT AND MATERIAL ROWS TOO, which carry no element to key on.
+    # Scaling only what matched left sodium's currentCollectorAnode at 26.7 kg
+    # per the component level against 11.9 per the element level: the same part
+    # of the same battery disagreeing with itself, which is the defect
+    # build_unknown_rows already fixed for the row path. The whole-component
+    # rows take the factor their own elements imply, mass-weighted PER DRAW --
+    # a collector that is all copper takes the full factor, terminals that are
+    # part aluminium already take less.
+    element_rows = (keys.code == params.scope.element_parameter_code).to_numpy()
+    for component, by_element in template["mass_scale"].items():
+        at_component = (keys.component == component).to_numpy()
+        elements_here = at_component & element_rows
+        if elements_here.any():
+            total = draws[elements_here].sum(axis=0)
+            scaled_total = np.zeros_like(total)
+            for position in np.where(elements_here)[0]:
+                factor = float(by_element.get(str(keys.element.iloc[position]), 1.0))
+                scaled_total += draws[position] * factor
+            with np.errstate(divide="ignore", invalid="ignore"):
+                weighted = np.where(total > 0, scaled_total / total, 1.0)
+            whole = at_component & ~element_rows
+            if whole.any():
+                draws[whole] *= weighted[None, :]
+        for element, factor in by_element.items():
+            target = (at_component & (keys.element == element).to_numpy()
+                      & element_rows)
+            draws[target] *= float(factor)
+    # The swaps rename; they do not scale. Two rows can collapse into one, and
+    # they are SUMMED below rather than one being dropped.
+    for component, mapping in template["element_swaps"].items():
+        target = keys.component == component
+        keys.loc[target, "element"] = keys.loc[target, "element"].replace(mapping)
+
+    improvement = improvement_factor_draws(params, float(year))
+    if improvement is not None:
+        draws *= np.asarray(improvement)[None, :]
+    draws *= np.asarray(scale)[None, :]
+
+    grouped = keys.groupby(["code", "component", "element"], dropna=False).indices
+    out = []
+    mc = params.monte_carlo
+    for (code, component, element), positions in grouped.items():
+        row = draws[positions].sum(axis=0)
+        out.append({
+            "code": code, "component": component, "element": element,
+            # mass_kg is NOT written here. Value is the central estimate and
+            # takes the factor's MODE, exactly as it takes the improvement's;
+            # meanValue is the mean of the draws. A skewed triangular makes
+            # those different numbers, and the caller multiplies the existing
+            # central by the mode rather than having the mean written over it.
+            "mass_mean": float(np.mean(row)),
+            "mass_median": float(np.median(row)), "mass_std": float(np.std(row)),
+            "mass_p2.5": float(np.percentile(row, mc.lower_percentile)),
+            "mass_p97.5": float(np.percentile(row, mc.upper_percentile)),
+        })
+    return pd.DataFrame(out)
+
+
 def build_unknown_rows(model: CompositionModel, params, capacities: pd.DataFrame,
                        chemistry: str) -> pd.DataFrame:
     """
@@ -492,6 +611,48 @@ def build_unknown_rows(model: CompositionModel, params, capacities: pd.DataFrame
         aggregation.update({c: "first" for c in rows.columns
                             if c not in summable and c not in group})
         rows = rows.groupby(group, as_index=False, dropna=False).agg(aggregation)
+
+    # ------------------------------------------------------------------
+    # The packaging-trust factor, as a DISTRIBUTION. Everything above this
+    # point multiplies statistics by constants, which is exact. This factor is
+    # a triangular, so the rows it touches have their statistics rebuilt from
+    # the draws instead -- see unknown_scaled_statistics for why scaling a
+    # percentile by a random number is not a percentile of anything.
+    # ------------------------------------------------------------------
+    code_to_level = {getattr(params.scope, attribute): level
+                     for level, attribute in LEVEL_CODES.items()}
+    rebuilt = []
+    for (segment, year), group in rows.groupby(["segment", "year"], dropna=False):
+        stats = unknown_scaled_statistics(
+            model, params, chemistry,
+            float(group.capacity_kwh_nominal.iloc[0]), float(year))
+        if stats.empty:
+            continue
+        stats["level"] = stats["code"].map(code_to_level)
+        stats["segment"], stats["year"] = segment, year
+        rebuilt.append(stats.drop(columns=["code"]))
+
+    if rebuilt:
+        replacement = pd.concat(rebuilt, ignore_index=True)
+        on = ["segment", "year", "level", "component", "element"]
+        replaced = replacement.set_index(on)
+        index = pd.MultiIndex.from_frame(rows[on])
+        touched = index.isin(replaced.index)
+        for column in [c for c in replaced.columns if c in rows.columns]:
+            values = index[touched].map(replaced[column])
+            rows.loc[touched, column] = np.asarray(values, dtype=float)
+        # The central keeps the convention used for every other chemistry: the
+        # MODE of the factor, not the mean of the draws.
+        mode = float(params.technology.unknown_chemistry_mass_scale[chemistry]["mode"])
+        rows.loc[touched, "mass_kg"] = (
+            pd.to_numeric(rows.loc[touched, "mass_kg"], errors="coerce") * mode)
+        # kg_per_kwh follows the mass it is derived from.
+        if "kg_per_kwh" in rows.columns:
+            rows.loc[touched, "kg_per_kwh"] = (
+                pd.to_numeric(rows.loc[touched, "mass_kg"], errors="coerce")
+                / pd.to_numeric(rows.loc[touched, "capacity_kwh_nominal"], errors="coerce"))
+        print(f"    [{chemistry}] packaging trust applied to "
+              f"{int(touched.sum()):,} rows from draws")
 
     rows["chemistry"] = chemistry
     rows["layer1"] = chemistry
