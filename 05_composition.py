@@ -51,6 +51,8 @@ if str(PROJECT_ROOT) not in sys.path:
 import matplotlib  # noqa: E402
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
+from typing import NamedTuple
+
 import numpy as np  # noqa: E402
 import pandas as pd  # noqa: E402
 
@@ -789,12 +791,28 @@ def apply_pack_rules(rows: pd.DataFrame, params, chemistry: str) -> pd.DataFrame
     return with_pack_voltages(rows, params)
 
 
+class PackDraws(NamedTuple):
+    """One voltage's masses at both levels, in kg, (n_rows, n_draws)."""
+    elements: list[str]
+    element_masses: np.ndarray
+    components: list[str]
+    component_masses: np.ndarray
+
+
 def apply_pack_rules_to_draws(keys: pd.DataFrame, draws: np.ndarray, params,
-                              chemistry: str) -> dict[int, tuple[list[str], np.ndarray]]:
+                              chemistry: str) -> dict[int, PackDraws]:
     """
     The three pack rules, on the DRAWS, in the same order as `apply_pack_rules`.
 
-    Returns {voltage: (elements, masses)} with masses (n_elements, n_draws) in kg.
+    Returns {voltage: PackDraws} -- the elements, and the COMPONENTS beside
+    them. `keys` must come from `component_element_draws_at(..., code=None)`,
+    which carries the component rows as well as the element ones.
+
+    WHY BOTH LEVELS. The elements do not add up to the pack: the cell casing and
+    the separator have no element rows at all, and the electrolyte's cover 1% of
+    its mass. That is 7-11% of the pack, growing with capacity, and it is the
+    part a recycler has to deal with rather than sell. Only the component level
+    closes the balance.
 
     WHY THIS EXISTS. `apply_pack_rules` works on DataFrame rows; the draws are
     an array. Until this function the arrays were written straight out of
@@ -804,14 +822,42 @@ def apply_pack_rules_to_draws(keys: pd.DataFrame, draws: np.ndarray, params,
     That was the third drift between these two outputs.
 
     It is a second implementation of the rules, which is a risk this project has
-    already been bitten by. It is guarded the only way that actually works:
-    `check_draws_match_workbook()` compares the means from here against the CSV
-    path's own numbers on every run, and raises if they part company.
+    already been bitten by. `check_draws_match_workbook()` compares the means
+    from here against the CSV path's own numbers on every run, at both levels,
+    and raises if they part company.
     """
-    tech = params.technology
-    component = keys["component"].to_numpy()
-    element = keys["element"].to_numpy()
-    masses = np.asarray(draws, dtype=np.float64).copy()
+    tech, scope = params.technology, params.scope
+    code = keys["code"].to_numpy()
+    at_element = code == scope.element_parameter_code
+    at_component = code == scope.component_parameter_code
+
+    masses = np.asarray(draws, dtype=np.float64)
+    component_names = [str(c) for c in keys["component"].to_numpy()[at_component]]
+    component_masses = masses[at_component].copy()
+    component = keys["component"].to_numpy()[at_element]
+    element = keys["element"].to_numpy()[at_element]
+    masses = masses[at_element].copy()
+
+    def carry_up(before: np.ndarray, after: np.ndarray, touched: set,
+                 totals: np.ndarray) -> None:
+        """
+        Move a component's own row by what the rule did to its elements.
+
+        A factor keyed on an element misses the component row entirely, which is
+        how currentCollectorAnode once read 29.7 kg at component level against
+        14.2 kg summed over its elements. The component takes the mass-weighted
+        factor of the elements beneath it -- PER DRAW, because the weights are
+        the draw's own masses and a single average factor would be right for no
+        draw in particular.
+        """
+        for name in touched:
+            position = [i for i, c in enumerate(component_names) if c == name]
+            here = component == name
+            if not position or not here.any():
+                continue
+            was, now = before[here].sum(axis=0), after[here].sum(axis=0)
+            factor = np.divide(now, was, out=np.ones_like(now), where=was > 0)
+            totals[position[0]] *= factor
 
     # 1. Split the module enclosure FIRST, so only its iron half is available to
     #    scale. The component's own total does not move -- only its makeup.
@@ -834,21 +880,71 @@ def apply_pack_rules_to_draws(keys: pd.DataFrame, draws: np.ndarray, params,
         factor = cell_mass_ratio(params, chemistry)
         if factor != 1.0:
             iron = np.isin(component, list(tech.structure_iron_components)) & (element == "Fe")
+            before = masses.copy()
             masses[iron] *= factor
+            carry_up(before, masses, set(tech.structure_iron_components),
+                     component_masses)
 
     # 3. Expand to the pack voltages, which only touches copper.
-    out: dict[int, tuple[list[str], np.ndarray]] = {}
+    out: dict[int, PackDraws] = {}
     for voltage in tech.pack_voltages_v:
         per_voltage = masses.copy()
+        per_component = component_masses.copy()
         copper_factor = float(tech.copper_scale_by_voltage[voltage])
         if copper_factor != 1.0:
             copper = (np.isin(component, list(tech.voltage_scaled_copper_components))
                       & (element == "Cu"))
+            before = per_voltage.copy()
             per_voltage[copper] *= copper_factor
+            carry_up(before, per_voltage, set(tech.voltage_scaled_copper_components),
+                     per_component)
         elements = sorted(set(str(e) for e in element))
         stacked = np.vstack([per_voltage[element == e].sum(axis=0) for e in elements])
-        out[int(voltage)] = (elements, stacked)
+        order = np.argsort(component_names)
+        out[int(voltage)] = PackDraws(
+            elements, stacked,
+            [component_names[i] for i in order], per_component[order])
     return out
+
+
+def check_draws_match_workbook(model: CompositionModel, params, chemistry: str,
+                               capacity: float, tolerance: float = 0.005) -> None:
+    """
+    The draws and the CSV path must agree, at BOTH levels, or raise.
+
+    Two implementations of the same three rules is the risk this function is
+    paid to cover: the arrays have drifted from the workbook three times in this
+    project's history -- 9.9 points on iron, 5.8 on aluminium, and a 36 kg frame
+    against 88 kg. The docstring above has claimed this check existed since
+    then; it did not, until now.
+    """
+    keys, raw = model.component_element_draws_at(capacity, chemistry=chemistry,
+                                                 code=None)
+    per_voltage = apply_pack_rules_to_draws(keys, raw, params, chemistry)
+    rows = apply_pack_rules_to_workbook(
+        rows_for(model, params, chemistry, capacity), params, chemistry)
+    scope = params.scope
+    for voltage, drawn in per_voltage.items():
+        here = rows[rows["voltage_v"] == voltage]
+        for code, names, masses, column in (
+                (scope.element_parameter_code, drawn.elements,
+                 drawn.element_masses, "Layer 4"),
+                (scope.component_parameter_code, drawn.components,
+                 drawn.component_masses, "Layer 2")):
+            book = (here[here["parameterCode"] == code]
+                    .groupby(column)["meanValue"].sum())
+            for name, values in zip(names, masses):
+                expected = float(book.get(name, 0.0))
+                got = float(values.mean())
+                if expected <= 0 and got <= 0:
+                    continue
+                off = abs(got - expected) / max(expected, 1e-9)
+                if off > tolerance:
+                    raise SystemExit(
+                        f"{chemistry} {capacity:.0f}kWh {voltage}V {code} {name}: "
+                        f"draws mean {got:.4f} kg against the workbook's "
+                        f"{expected:.4f} kg, {off:.2%} apart. The two paths "
+                        "through the pack rules have drifted.")
 
 
 def fixed_capacity_rows(model: CompositionModel, params, chemistry: str,
@@ -1150,19 +1246,23 @@ def main(argv: list[str] | None = None) -> int:
             # so there is one set per voltage -- a single array could only ever
             # have been right for one of the two.
             keys, raw_draws = model.component_element_draws_at(
-                anchor, chemistry=chemistry)
-            for voltage, (elements, masses) in apply_pack_rules_to_draws(
+                anchor, chemistry=chemistry, code=None)
+            for voltage, drawn in apply_pack_rules_to_draws(
                     keys, raw_draws, params, chemistry).items():
-                totals = masses.sum(axis=0)
-                fractions = np.zeros_like(masses)
-                live = totals > 0
-                fractions[:, live] = masses[:, live] / totals[live]
                 stem = f"batt_{chemistry}_{int(anchor)}kWh_{voltage}V"
-                # (draws, elements) float32, the orientation the electronics files use.
-                np.save(draws_dir / f"{stem}_fractions.npy",
-                        fractions.T.astype(np.float32))
-                (draws_dir / f"{stem}_elements.txt").write_text("\n".join(elements))
-                n_written += 1
+                for names, masses, level in (
+                        (drawn.elements, drawn.element_masses, "elements"),
+                        (drawn.components, drawn.component_masses, "components")):
+                    totals = masses.sum(axis=0)
+                    fractions = np.zeros_like(masses)
+                    live = totals > 0
+                    fractions[:, live] = masses[:, live] / totals[live]
+                    suffix = "" if level == "elements" else "_component"
+                    # (draws, rows) float32, the orientation the electronics files use.
+                    np.save(draws_dir / f"{stem}{suffix}_fractions.npy",
+                            fractions.T.astype(np.float32))
+                    (draws_dir / f"{stem}_{level}.txt").write_text("\n".join(names))
+                    n_written += 1
     print(f"\nWrote {n_written} per-draw fraction arrays to "
           f"{params.export.composition_output_dir}/element_draws/ "
           f"({len(anchors)} anchors x {len(chemistries)} chemistries x "
@@ -1213,14 +1313,22 @@ def main(argv: list[str] | None = None) -> int:
             # writing the summed array directly is what left these files 9.9
             # percentage points adrift of the CSVs on iron.
             keys, raw_draws = model.component_element_draws_at(
-                capacity, chemistry=chemistry)
-            for voltage, (elements, masses) in apply_pack_rules_to_draws(
+                capacity, chemistry=chemistry, code=None)
+            check_draws_match_workbook(model, params, chemistry, capacity)
+            for voltage, drawn in apply_pack_rules_to_draws(
                     keys, raw_draws, params, chemistry).items():
                 stem = f"{chemistry}_{int(capacity)}kWh_{voltage}V"
                 np.save(directory / f"{stem}_mass_draws.npy",
-                        masses.T.astype(np.float32))
-                (directory / f"{stem}_elements.txt").write_text("\n".join(elements))
-                n_draw_files += 1
+                        drawn.element_masses.T.astype(np.float32))
+                (directory / f"{stem}_elements.txt").write_text(
+                    "\n".join(drawn.elements))
+                # The component level beside it: the elements do not add up to
+                # the pack, and 7-11% of it lives only here.
+                np.save(directory / f"{stem}_component_mass_draws.npy",
+                        drawn.component_masses.T.astype(np.float32))
+                (directory / f"{stem}_components.txt").write_text(
+                    "\n".join(drawn.components))
+                n_draw_files += 2
 
             # Built PER YEAR from the draws, not copied and scaled. The
             # improvement has to reach the statistics as a distribution or the
