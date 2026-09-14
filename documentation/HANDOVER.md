@@ -35,10 +35,12 @@ The rules that follow are his, stated repeatedly, and they are not negotiable:
 - **Never claim an unmeasured number.** A claim that a rerun changes nothing must
   be verified before it is made, not after. That specific mistake was made today.
 - **He decides what is useful.** Not the assistant.
-- **No dead code, and no flag that switches code off.** When something is cut,
-  it moves to its own runnable file — `06_segment_capacity.py` is the pattern.
-  A `write_segment_files: bool` was written for exactly this and rejected on
-  sight.
+- **No dead code, and no flag that switches code off.** A `write_segment_files:
+  bool` was written for exactly this and rejected on sight. When something is
+  cut it may move to its own runnable file as a holding place, but that is a
+  waiting room, not a home: `06_segment_capacity.py` sat there until 2026-09-14
+  and was then deleted, because the question it answered is now answered
+  per draw in RAWCLICStockAndFlow's `src/battery_capacity.py`.
 - **"Ready to run" means every output was checked, not the convenient ones.**
   `05` was called ready when only the segment-year files and the figures had
   been verified; the consolidated files — the actual deliverable — had never
@@ -98,14 +100,10 @@ ls data/raw/                                            # the .xlsx and the .csv
 ./.venv/bin/python 03_capacity_by_chemistry.py
 ./.venv/bin/python 04_chemistry_scenarios.py
 ./.venv/bin/python 05_composition.py                # THE DELIVERABLE, and every figure
-./.venv/bin/python 06_segment_capacity.py           # the cut segment work; not needed
 ```
 
 **`05_composition.py` is the one that matters.** It writes the consolidated
 files, the per-draw arrays and all 18 figures.
-
-**`06_segment_capacity.py` is not part of the deliverable and does not need to
-run.** See §3, "what 05 stopped doing".
 
 **Its runtime at 200,000 draws has not been timed.** The last measured figure
 (5 min 15 s) was for the pre-merge `03` and does not carry over — `05` now does
@@ -130,8 +128,7 @@ ps.current = patched
 ```
 
 Then `importlib.import_module('05_composition').main([])`. Verified today: exit
-0, 9 consolidated files, 35 draw arrays, 18 figures. `06` runs the same way and
-also exits 0.
+0, 9 consolidated files, 35 draw arrays, 18 figures.
 
 ---
 
@@ -168,26 +165,34 @@ so the consumer interpolates. 287 lines lighter.
 Removed outright, not disabled — a switch that turns code off is still code
 nobody reads:
 
-| gone from `05` | now in |
+| gone from `05` | where it went |
 |---|---|
-| `segment_capacities`, `capacity_growth_factor` | `06_segment_capacity.py` |
-| `range_saturated_capacities`, `segment_consumption`, `pack_density` | `06_segment_capacity.py` |
-| the segment-year export loop, `capacity_by_segment_year.csv` | `06_segment_capacity.py` |
-| the `EVDetails` import | `06` only |
+| `segment_capacities`, `capacity_growth_factor` | `06_segment_capacity.py`, then **deleted 2026-09-14** |
+| `range_saturated_capacities`, `segment_consumption`, `pack_density` | same |
+| the segment-year export loop, `capacity_by_segment_year.csv` | same |
 | `density_factor` | **deleted** — zero callers once the mass scaling moved to the drawn improvement |
 | the figures' read-back of `composition_*.csv` from disk | **deleted** — they build their own rows now |
 
-`06` writes `segment_composition_<chemistry>.csv`, named apart from `05`'s
-output so the two can never be mistaken for each other. It imports the row
-builders from `05` rather than copying them: two copies of `build_rows`
-drifting apart is the failure this project has already had three times.
+**`06_segment_capacity.py` is gone as of 2026-09-14, and so are the eleven
+parameters only it read** — `capacity_projection`, `capacity_scenario`,
+`capacity_growth_per_decade`, `capacity_growth_segments`,
+`max_projected_capacity_kwh`, `export_format`, `range_saturation_km`,
+`apply_range_saturation`, `segment_consumption_wh_per_km`,
+`consumption_from_year` and `capacity_fallback`. 119 parameters remain.
 
-> **`06`'s two defects are stated in its own docstring, and they are why it is
-> not the deliverable.** The capacity curve is fitted over seven observed years
-> and projected over forty-four; and the range target fires for two chemistries
-> and not the other seven, with no year in the line that sets it, so sodium and
-> solid-state hold one capacity for all fifty years. **If that path is ever
-> revived, the range target must apply to all nine chemistries or to none.**
+It was kept runnable in case the segment path was revived. It was not: the
+question "what capacity does a segment carry" is now answered per draw in
+RAWCLICStockAndFlow's `src/battery_capacity.py`, as a five-level discrete
+mixture measured from EV_details.csv with a drawn growth rate and plateau year.
+That is a better answer than the fit, and it lives in the project that knows the
+fleet.
+
+> **Its two defects are why it was never the deliverable, and they are the
+> reason not to revive it from history without rewriting it.** The capacity
+> curve was fitted over seven observed years and projected over forty-four; and
+> the range target fired for two chemistries and not the other seven, with no
+> year in the line that set it, so sodium and solid-state held one capacity for
+> all fifty years. Recoverable from `be418ad` and its successors if ever needed.
 
 ### The composition figures answer a different question now
 
@@ -364,7 +369,8 @@ NMC high 339.
    2030/2040/2050 is gone, replaced by the 2020→2070 ramp. **Flagged, not
    confirmed.**
 
-**Both moved to `06_segment_capacity.py`, which is no longer the deliverable:**
+**Both moved to `06_segment_capacity.py`, and went with it when that file was
+deleted on 2026-09-14. Recorded because the reasoning still matters:**
 
 4. **Sodium and solid-state capacity is a constant 86.4 kWh in segment C for
    every year 2020–2070.** `range_saturated_capacities()` fires on
@@ -379,8 +385,8 @@ NMC high 339.
    below — the sign flips. A fix was written and **reverted on instruction**. The
    open question was: range saturation **off for all nine, or on for all nine**.
    It must never again apply to a subset.
-5. **The fitted capacity curve.** `segment_capacities()` still calls
-   `ev.curve(segment)`, in `06`. Matthias's position is unambiguous — *"fitting is shit"* —
+5. **The fitted capacity curve.** `segment_capacities()` called
+   `ev.curve(segment)`. Matthias's position is unambiguous — *"fitting is shit"* —
    and the evidence supports him: seven observed years against forty-four
    projected, per-segment slopes running **−2.5 to +2.4 kWh/yr** with no
    consistent sign, and the fit disagreeing with its own data (segment C measured
@@ -424,10 +430,9 @@ NMC high 339.
 |---|---|
 | `src/params_schema.py` | **the file to edit.** 128 settings, each with its own comment; `00_parameters.py` validates every one |
 | `src/composition.py` | composition at any capacity, with uncertainty. `weights_at()` takes `year_factor_draws`; `element_draws_at()` returns the draws themselves |
-| `src/ev_details.py` | the vehicle table: parsing, smoothing, the fitted curve. **`05` no longer imports it** — only `06` does |
+| `src/ev_details.py` | the vehicle table: parsing, smoothing, the fitted curve. **`05` does not import it** — only `03_capacity_by_chemistry.py` does |
 | `src/scenarios.py` | the three chemistry-share scenarios |
 | `05_composition.py` | **the deliverable.** `apply_pack_rules()`, `fixed_capacity_rows()`, `improvement_factor_draws()`, `build_unknown_rows()` |
-| `06_segment_capacity.py` | the segment work cut out of `05`. Runnable, not needed, two known defects in its docstring |
 | `technology.mass_improvement_2070` | **the improvement, as a distribution** |
 | `export.distribution_figure_year` | which year the distribution figures are for |
 | `technology.structure_reference_chemistry` | sets the iron level for all nine |
@@ -437,7 +442,7 @@ NMC high 339.
 | `export.capacity_scenario` | `saturate` / `grow_low` / `grow_high` |
 | `technology.cell_density_override_wh_per_kg` | where the workbook's density is not believed — LMFP only |
 | `data/raw/` | the two inputs — **not in git**, supplied via iCloud |
-| `data/composition/` | `element_draws/` — generated by `05`. `segment_composition_*.csv` and `capacity_by_segment_year.csv` only if you run `06` |
+| `data/composition/` | `element_draws/` — generated by `05` |
 | `data/consolidated/` | **the deliverable** — nine files in the workbook schema plus their draw arrays |
 | `figures/` | 18 figures — generated |
 

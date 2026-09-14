@@ -424,20 +424,6 @@ class EVDetailsParams:
     first_year: int = 2015
     last_year: int = 2026
 
-    # WHEN A SEGMENT HAS TOO FEW MODELS TO FIT A CURVE, fall back rather than
-    # dropping it -- all twelve segments must appear in the exported files, even
-    # ones the market barely populates.
-    #   'segment_median'  the median capacity of that segment's own models. Real
-    #                     data, just thin. JA has two (Hyundai INSTER, 42 and 49
-    #                     kWh nominal), so its median is 45.5.
-    #   'reference_map'   reference_battery_size_map. Last resort, for a segment
-    #                     with no models at all. Note the map says 25 kWh for JA
-    #                     against those cars' 45.5, so it is the worse source
-    #                     wherever real models exist.
-    # Every exported row carries capacity_source saying which was used.
-    # SAFE TO CHANGE: yes.
-    capacity_fallback: str = "segment_median"
-
     # A segment-year with fewer models than this is dropped rather than drawn:
     # a median of two cars is a coincidence, not a trend.
     # SAFE TO CHANGE: yes. Below 3 the lines get noisy.
@@ -721,63 +707,6 @@ class ExportParams:
     last_export_year: int = 2070
     export_year_step: int = 5
 
-    # ⚠️ WHAT HAPPENS TO CAPACITY AFTER THE DATA ENDS. The fitted capacity per
-    # segment runs to 2026 and no further; everything beyond is an assumption,
-    # and this is where it is made.
-    #   'hold'   the 2026 fitted capacity, unchanged, to 2070
-    #   'trend'  continues the 2016-2026 gradient linearly
-    # 'hold' is the default because it is the assumption that adds least: pack
-    # capacity has been flattening in most segments since 2023, and continuing a
-    # decade of growth for another forty-four years would put C-segment cars at
-    # well over 100 kWh with nothing supporting it.
-    # SAFE TO CHANGE: yes -- 'trend' is there to bound the other side.
-    capacity_projection: str = "hold"
-
-    # ⚠️ WHERE THE CHEMISTRY COST SAVING GOES. NMC -> LFP -> sodium each cut the
-    # pack cost, and that saving can be taken as a cheaper car or as a bigger
-    # battery. This is the switch, and it is an ASSUMPTION about buyer and maker
-    # behaviour, not a fitted trend.
-    #   'saturate'  all of it goes to price; capacity follows capacity_projection
-    #   'grow_low'  part of it goes to capacity, +5% per decade in A-D
-    #   'grow_high' more of it goes to capacity, +10% per decade in A-D
-    # 'saturate' is the default because it is what the record shows. Across 717
-    # A-D models with a German list price, an LFP car at the SAME capacity and
-    # segment is 17.7% +/- 1.4 pp cheaper, while at the same PRICE and segment it
-    # carries just 2.0% +/- 1.8 pp more kWh -- statistically nothing. Through
-    # 2026 the saving went essentially all to price and none to capacity. The
-    # grow_* scenarios assume that split changes; nothing measured says it will.
-    # SAFE TO CHANGE: yes -- that is the point of the switch.
-    capacity_scenario: str = "saturate"
-
-    # Growth per decade under each grow_* scenario, applied to the PROJECTED
-    # years only (after each segment's last fitted year), compounding.
-    # SAFE TO CHANGE: yes.
-    capacity_growth_per_decade: dict[str, float] = field(default_factory=lambda: {
-        "grow_low": 0.05,
-        "grow_high": 0.10,
-    })
-
-    # ⚠️ ONLY THESE SEGMENTS GROW. A-D and their J counterparts are the
-    # price-competitive end, where a cheaper chemistry can plausibly be spent on
-    # capacity. E, F, JE and JF are left flat: they are not price-constrained
-    # (segment F runs at 1256 EUR/kWh against 625-790 in A-C), they stay on
-    # NMC/NCA in every scenario, and their median capacity has been flat at
-    # ~91 kWh since 2022. Growing them too would be an assumption with the
-    # measured evidence against it.
-    # SAFE TO CHANGE: yes.
-    capacity_growth_segments: tuple[str, ...] = (
-        "A", "B", "C", "D", "JA", "JB", "JC", "JD")
-
-    # Cap on the projected capacity, kWh, whatever the projection or a range
-    # target says. A trend continued to 2070 has to stop somewhere, and an
-    # unbounded one silently leaves the range the composition model will answer
-    # for. Raised from 150 to 200 because a 1000 km range target needs 159 kWh
-    # in F and 194 in JF, and a cap of 150 was quietly clipping seven of the
-    # eleven segments -- which made the mass saving look bigger than the
-    # assumption actually gives. Any clipping is now reported.
-    # SAFE TO CHANGE: yes, but keep it at or below interpolation.max_capacity_kwh.
-    max_projected_capacity_kwh: float = 200.0
-
     # Levels written. Each becomes its own set of rows, tagged in a 'level'
     # column, so one file answers at whichever detail the caller needs.
     # ⚠️ 'element' does NOT add up to 'component': batteryCellCasing and
@@ -877,11 +806,6 @@ class ExportParams:
     # Include the Monte Carlo percentile columns.
     # SAFE TO CHANGE: yes -- dropping them makes the files smaller, not better.
     include_uncertainty: bool = True
-
-    # 'csv' or 'xlsx'. CSV by default: these are handed to another model, and a
-    # csv is diffable, streamable and cannot carry a stale cached formula.
-    # SAFE TO CHANGE: yes.
-    export_format: str = "csv"
 
     # ⚠️ WHAT A COMPONENT IS MADE OF, WHERE THE WORKBOOK DOES NOT SAY.
     #
@@ -1115,12 +1039,6 @@ class TechnologyParams:
     the range.
     """
 
-    # Whether a chemistry's capacity is set by a range target rather than by
-    # continuing its segment's historical capacity.
-    # SAFE TO CHANGE: yes. Off means every chemistry keeps the segment capacity
-    # from 03, which is the conservative assumption.
-    apply_range_saturation: bool = True
-
     # ⚠️ 400 V AND 800 V, IN THE SAME FILE. Every row is written twice, once per
     # pack voltage, tagged in a `voltage_v` column. The same power at double the
     # voltage is half the current, so the conductors carry half the copper --
@@ -1221,36 +1139,6 @@ class TechnologyParams:
     # SAFE TO CHANGE: yes.
     voltage_scaled_copper_components: tuple[str, ...] = (
         "batteryPackCables", "batteryPackCellTerminals")
-
-    # The range a car is built for once density stops binding, in km, on the
-    # real-world consumption in EV_details.csv.
-    #
-    # SETTLED AT 600 km, and the reason is charging speed rather than range.
-    # A cap only bites if it sits below where the market would otherwise go, and
-    # today's median real range is already ~490 km -- so 1200 km would not have
-    # restrained anything, it would have mandated a 2.4x increase and produced
-    # 233 kWh packs, 65% larger than anything in the vehicle table. At 350 kW a
-    # 600 km car refills in about fifteen minutes, which is why real ranges have
-    # plateaued at 400-600 km instead of climbing: it is cheaper to charge
-    # faster than to carry more. Fast charging substitutes for capacity, and
-    # that substitution is what makes the material saving real.
-    #
-    # At 600 km and 500 Wh/kg the pack is 0.48x today's mass -- the density gain
-    # is taken as material rather than as range. Compare 1200 km, which gives
-    # 0.96x: no saving at all.
-    #
-    # The pairs, on the fleet mean:
-    #
-    #     range    500 Wh/kg   600      700      800
-    #      600 km    0.48      0.40     0.34     0.30
-    #      800 km    0.64      0.53     0.46     0.40
-    #     1000 km    0.80      0.66     0.57     0.50
-    #     1200 km    0.96      0.80     0.68     0.60
-    #     1500 km    1.19      1.00     0.85     0.75
-    #
-    # Rule of thumb: mass vs today = 0.40 x (range km / pack Wh/kg).
-    # SAFE TO CHANGE: yes -- this is THE lever, and the mass saving follows it.
-    range_saturation_km: float = 600.0
 
     # ⚠️ ENERGY DENSITY, AS A TRAJECTORY AND WITH ITS BASIS STATED.
     #
@@ -1457,19 +1345,6 @@ class TechnologyParams:
         # SAFE TO CHANGE: yes, and worth about 25% of pack mass at the extremes.
         "Na_ion": 0.650,
     })
-
-    # Real-world consumption per segment, Wh/km, used to turn a range target
-    # into a capacity. Left empty, it is taken from EV_details.csv -- the median
-    # of models introduced from 2022 on, which is 132 Wh/km for A rising to 194
-    # for JF. Fill it to override.
-    # SAFE TO CHANGE: yes. Note these are MILD-weather figures; the cold-weather
-    # column is about 35% higher, and a car built for 1000 km in January is a
-    # third bigger again.
-    segment_consumption_wh_per_km: dict[str, float] = field(default_factory=dict)
-
-    # Models introduced from this year on are used for the consumption median.
-    # SAFE TO CHANGE: yes.
-    consumption_from_year: int = 2022
 
     # The chemistry whose pack mass today is the comparison for "material
     # reduced by a third".
@@ -1692,10 +1567,6 @@ class Params:
             raise ParameterError(
                 f"ev_details.first_year ({ev.first_year}) must be below last_year "
                 f"({ev.last_year}).")
-        if ev.capacity_fallback not in ("segment_median", "reference_map"):
-            raise ParameterError(
-                f"ev_details.capacity_fallback must be 'segment_median' or "
-                f"'reference_map': {ev.capacity_fallback!r}")
         if ev.min_models_per_year < 1:
             raise ParameterError(
                 f"ev_details.min_models_per_year must be at least 1: "
@@ -1807,10 +1678,6 @@ class Params:
             raise ParameterError(
                 f"technology.improvement_to_year ({tech.improvement_to_year}) must be "
                 f"after improvement_from_year ({tech.improvement_from_year}).")
-        if tech.range_saturation_km <= 0:
-            raise ParameterError(
-                f"technology.range_saturation_km must be positive: "
-                f"{tech.range_saturation_km}")
         for chemistry, entry in tech.chemistry_energy_density.items():
             # Either naming is allowed: the SCENARIO chemistries (Na_ion,
             # solid_state) and the WORKBOOK ones (battLiFP_subsub, ...). Both are
@@ -1854,14 +1721,6 @@ class Params:
         if bad_ratio:
             raise ParameterError(
                 f"technology.cell_to_pack_ratio values must be in (0, 1]: {bad_ratio}")
-        bad_consumption = {name: value
-                           for name, value in tech.segment_consumption_wh_per_km.items()
-                           if value <= 0}
-        if bad_consumption:
-            raise ParameterError(
-                f"technology.segment_consumption_wh_per_km values must be positive "
-                f"Wh/km: {bad_consumption}")
-
         ex = self.export
         if ex.export_year_step < 1:
             raise ParameterError(
@@ -1870,34 +1729,6 @@ class Params:
             raise ParameterError(
                 f"export.first_export_year ({ex.first_export_year}) is after "
                 f"last_export_year ({ex.last_export_year}).")
-        if ex.capacity_projection not in ("hold", "trend"):
-            raise ParameterError(
-                f"export.capacity_projection must be 'hold' or 'trend': "
-                f"{ex.capacity_projection!r}")
-        grow_names = tuple(ex.capacity_growth_per_decade)
-        if ex.capacity_scenario not in ("saturate",) + grow_names:
-            raise ParameterError(
-                "export.capacity_scenario must be 'saturate' or one of "
-                f"{grow_names}: {ex.capacity_scenario!r}")
-        for name, rate in ex.capacity_growth_per_decade.items():
-            if not name.startswith("grow"):
-                raise ParameterError(
-                    "export.capacity_growth_per_decade keys must start with 'grow' "
-                    f"so no scenario can be confused with 'saturate': {name!r}")
-            if not 0.0 <= float(rate) < 1.0:
-                raise ParameterError(
-                    f"export.capacity_growth_per_decade[{name!r}] must be in [0, 1): "
-                    f"{rate!r}")
-        if ex.capacity_scenario != "saturate" and not ex.capacity_growth_segments:
-            raise ParameterError(
-                f"export.capacity_scenario is {ex.capacity_scenario!r} but "
-                "export.capacity_growth_segments is empty -- nothing would grow.")
-        if ex.max_projected_capacity_kwh > self.interpolation.max_capacity_kwh:
-            raise ParameterError(
-                f"export.max_projected_capacity_kwh ({ex.max_projected_capacity_kwh}) "
-                f"is above interpolation.max_capacity_kwh "
-                f"({self.interpolation.max_capacity_kwh}), so the export would ask the "
-                "composition model for a capacity it refuses to answer for.")
         unknown_levels = sorted(set(ex.export_levels) - {"component", "material", "element"})
         if unknown_levels:
             raise ParameterError(
@@ -1948,10 +1779,6 @@ class Params:
                     "export.unknown_chemistry_template entry, so no file could be "
                     "written for them at all -- add a template or set "
                     "export.write_unknown_chemistries = False.")
-        if ex.export_format not in ("csv", "xlsx"):
-            raise ParameterError(
-                f"export.export_format must be 'csv' or 'xlsx': {ex.export_format!r}")
-
         if not sc.scenario_file_name.endswith(".png"):
             raise ParameterError(
                 f"scenarios.scenario_file_name must end in '.png': {sc.scenario_file_name!r}")
