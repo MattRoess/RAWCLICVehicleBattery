@@ -947,6 +947,139 @@ def check_draws_match_workbook(model: CompositionModel, params, chemistry: str,
                         "through the pack rules have drifted.")
 
 
+def unknown_template_draws(model: CompositionModel, params, chemistry: str,
+                           capacity: float) -> tuple[pd.DataFrame, np.ndarray]:
+    """
+    (keys, masses) for a chemistry with no composition of its own, in the shape
+    `component_element_draws_at(code=None)` returns and ready for the pack rules.
+
+    WHY THIS EXISTS. These two chemistries were the only ones with no persisted
+    draws, so stage 04_04 downstream could not read them at all and dropped the
+    whole car -- the frame, the enclosure, the cables and both collectors along
+    with the cathode nobody knows. That threw away roughly half of each pack by
+    mass for no reason beyond the export.
+
+    WHAT IT CLAIMS AND WHAT IT DOES NOT. The packaging is the base chemistry's,
+    at the base chemistry's mass: a sodium pack is built like the LFP pack it is
+    derived from. The active materials are ZERO here, and zero means "this model
+    does not describe it" -- the consumer must keep reporting them as a gap, or
+    a pack will read as fully known when its cathode is not.
+
+    It is a second path to the same numbers as `build_unknown_rows`, which is a
+    risk this project has been bitten by three times.
+    `check_unknown_draws_match_workbook()` compares them on every run.
+    """
+    template = params.export.unknown_chemistry_template[chemistry]
+    keys, draws = model.component_element_draws_at(
+        capacity, chemistry=template["based_on"], code=None)
+    keys = keys.copy()
+    draws = np.asarray(draws, dtype=np.float64).copy()
+
+    keep = ~keys.component.isin(template["remove_components"]).to_numpy()
+    keys, draws = keys[keep].reset_index(drop=True), draws[keep]
+
+    # The template's deterministic factors, and the component rows with them:
+    # a factor keyed on an element misses the row that carries no element, and
+    # that is how currentCollectorAnode once read 26.7 kg at component level
+    # against 11.9 at element level. The component takes the factor its own
+    # elements imply, mass-weighted PER DRAW.
+    element_rows = (keys.code == params.scope.element_parameter_code).to_numpy()
+    for component, by_element in template["mass_scale"].items():
+        at_component = (keys.component == component).to_numpy()
+        here = at_component & element_rows
+        if not here.any():
+            continue
+        total = draws[here].sum(axis=0)
+        scaled = np.zeros_like(total)
+        for position in np.where(here)[0]:
+            scaled += draws[position] * float(
+                by_element.get(str(keys.element.iloc[position]), 1.0))
+        with np.errstate(divide="ignore", invalid="ignore"):
+            weighted = np.where(total > 0, scaled / total, 1.0)
+        whole = at_component & ~element_rows
+        if whole.any():
+            draws[whole] *= weighted[None, :]
+        for element, factor in by_element.items():
+            target = at_component & (keys.element == element).to_numpy() & element_rows
+            draws[target] *= float(factor)
+
+    # The swaps rename, they do not scale. Two rows can collapse into one and
+    # are summed by the pack rules afterwards, not dropped.
+    for component, mapping in template["element_swaps"].items():
+        target = keys.component == component
+        keys.loc[target, "element"] = keys.loc[target, "element"].replace(mapping)
+
+    # How much the inherited packaging is trusted -- one doubt about one
+    # inheritance, drawn once per chemistry, on the components it was inherited
+    # for and no others.
+    scale = unknown_scale_draws(params, chemistry)
+    if scale is not None:
+        in_scope = keys.component.isin(
+            params.technology.unknown_chemistry_scaled_components).to_numpy()
+        draws[in_scope] *= np.asarray(scale)[None, :]
+
+    # What is NOT claimed is zero, and zero here means unknown. The cathode, the
+    # anode and the electrolyte keep nothing: a plausible number borrowed from a
+    # lithium chemistry is a claim nobody made.
+    unclaimed = ~keys.component.isin(template["claim_masses_for"]).to_numpy()
+    draws[unclaimed] = 0.0
+    return keys, draws
+
+
+def check_unknown_draws_match_workbook(model: CompositionModel, params,
+                                       chemistry: str, capacity: float,
+                                       tolerance: float = 0.005) -> None:
+    """
+    The unknown chemistry's draws and its CSV must agree, or raise.
+
+    Compared at 2020, where the improvement factor is exactly 1 in every draw,
+    so the arrays -- which carry no year -- and that year's rows are the same
+    quantity.
+
+    ONE CORRECTION IS NEEDED AND IT IS NOT A FUDGE. `build_unknown_rows` writes
+    the packaging trust's MODE into the central column, by the same convention
+    every other chemistry uses for the improvement. The draws carry the factor
+    itself, whose MEAN is (min + mode + max) / 3 -- 1.0667 against a mode of 1.0
+    for sodium, 0.8667 against 0.8 for solid-state. So the row is compared
+    against the draws divided by mean/mode, on the components the trust applies
+    to. Everything else is deterministic on both sides and compared as it is.
+    """
+    keys, raw = unknown_template_draws(model, params, chemistry, capacity)
+    per_voltage = apply_pack_rules_to_draws(keys, raw, params, chemistry)
+    rows = apply_pack_rules(
+        build_unknown_rows(model, params, pd.DataFrame([{
+            "segment": f"{int(capacity)}kWh", "year": 2020,
+            "capacity_kwh_nominal": capacity,
+            "capacity_is_projected": False, "capacity_source": "workbook anchor"}]),
+            chemistry), params, chemistry)
+
+    band = params.technology.unknown_chemistry_mass_scale.get(chemistry)
+    drawn_over_central = 1.0
+    if band is not None:
+        drawn_over_central = ((float(band["min"]) + float(band["mode"])
+                               + float(band["max"])) / 3.0) / float(band["mode"])
+    in_scope = set(params.technology.unknown_chemistry_scaled_components)
+
+    for voltage, drawn in per_voltage.items():
+        here = rows[rows["voltage_v"] == voltage]
+        book = (here[here.level == "component"]
+                .groupby("component")["mass_kg"].sum())
+        for name, values in zip(drawn.components, drawn.component_masses):
+            expected = float(book.get(name, 0.0))
+            got = float(values.mean())
+            if name in in_scope:
+                got /= drawn_over_central
+            if expected <= 0 and got <= 0:
+                continue
+            off = abs(got - expected) / max(expected, 1e-9)
+            if off > tolerance:
+                raise SystemExit(
+                    f"{chemistry} {capacity:.0f}kWh {voltage}V {name}: draws give "
+                    f"{got:.4f} kg against the workbook's {expected:.4f} kg, "
+                    f"{off:.2%} apart. The two paths through the template have "
+                    "drifted.")
+
+
 def fixed_capacity_rows(model: CompositionModel, params, chemistry: str,
                         capacity: float, unknown: bool) -> pd.DataFrame:
     """
@@ -1364,6 +1497,7 @@ def main(argv: list[str] | None = None) -> int:
     # named for its capacity. That is a shim, and the 'segment' it returns is
     # dropped again below.
     # ---------------------------------------------------------------------
+    n_unknown_draw_files = 0
     for chemistry in unknown:
         capacities = pd.DataFrame([
             {"segment": f"{int(a)}kWh", "year": y, "capacity_kwh_nominal": a,
@@ -1409,6 +1543,35 @@ def main(argv: list[str] | None = None) -> int:
         filled = int(rows["Value"].notna().sum())
         print(f"  {chemistry:20s} {len(rows):>7,} rows -> {path.name}"
               f"   ({100 * filled / len(rows):.0f}% with a mass)")
+
+        # THE DRAWS, like every other chemistry. Without these two sets of
+        # arrays a consumer cannot read these chemistries at all and drops the
+        # whole car -- the frame, the enclosure, the cables and both collectors
+        # along with the cathode nobody knows. Roughly half of each pack by mass
+        # was being thrown away for no reason beyond the export.
+        #
+        # The active materials are ZERO in them, and a consumer must keep
+        # reporting these two as a gap on that basis: zero means "not described
+        # here", not "none present".
+        for capacity in anchors:
+            check_unknown_draws_match_workbook(model, params, chemistry, capacity)
+            keys, raw_draws = unknown_template_draws(model, params, chemistry,
+                                                     capacity)
+            for voltage, drawn in apply_pack_rules_to_draws(
+                    keys, raw_draws, params, chemistry).items():
+                stem = f"{chemistry}_{int(capacity)}kWh_{voltage}V"
+                np.save(directory / f"{stem}_mass_draws.npy",
+                        drawn.element_masses.T.astype(np.float32))
+                (directory / f"{stem}_elements.txt").write_text(
+                    "\n".join(drawn.elements))
+                np.save(directory / f"{stem}_component_mass_draws.npy",
+                        drawn.component_masses.T.astype(np.float32))
+                (directory / f"{stem}_components.txt").write_text(
+                    "\n".join(drawn.components))
+                n_unknown_draw_files += 2
+    print(f"  wrote {n_unknown_draw_files} per-draw arrays for the chemistries "
+          "with no composition of their own -- packaging only, active materials "
+          "zero")
     print(f"\n  consolidated -> {params.export.consolidated_output_dir}/, "
           "one file per chemistry with its draw arrays beside it.")
 
