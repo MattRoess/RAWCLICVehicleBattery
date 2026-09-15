@@ -792,11 +792,21 @@ def apply_pack_rules(rows: pd.DataFrame, params, chemistry: str) -> pd.DataFrame
 
 
 class PackDraws(NamedTuple):
-    """One voltage's masses at both levels, in kg, (n_rows, n_draws)."""
+    """
+    One voltage's masses at every level, in kg, (n_rows, n_draws).
+
+    `pairs` is the CROSS of the two, named "<element>|<component>", plus one
+    "__unresolved__|<component>" row per component holding what that component
+    weighs beyond the elements it resolves. With that row the pairs sum to the
+    component and the component sums to the pack, so a consumer can take the
+    resolved part and the remainder without either being inferred.
+    """
     elements: list[str]
     element_masses: np.ndarray
     components: list[str]
     component_masses: np.ndarray
+    pairs: list[str]
+    pair_masses: np.ndarray
 
 
 def apply_pack_rules_to_draws(keys: pd.DataFrame, draws: np.ndarray, params,
@@ -901,9 +911,31 @@ def apply_pack_rules_to_draws(keys: pd.DataFrame, draws: np.ndarray, params,
         elements = sorted(set(str(e) for e in element))
         stacked = np.vstack([per_voltage[element == e].sum(axis=0) for e in elements])
         order = np.argsort(component_names)
+        ordered_components = [component_names[i] for i in order]
+        ordered_masses = per_component[order]
+
+        # The cross of the two: the mass of an element WITHIN a component.
+        #
+        # NO REMAINDER ROW. What a component weighs beyond the elements it
+        # resolves is its component mass minus these, and a consumer derives it
+        # rather than being handed it. The first version of this wrote
+        # clip(component - resolved, 0, None) and that was wrong: the
+        # difference fluctuates around zero draw by draw, clipping kept only the
+        # positive excursions, and 1.37 kg of pure Monte Carlo noise appeared as
+        # anode mass. A residual is not a quantity to store.
+        pairs, pair_masses = [], []
+        for name in ordered_components:
+            here = component == name
+            for value in sorted(set(str(e) for e in element[here])):
+                mass = per_voltage[here & (element == value)].sum(axis=0)
+                if not np.any(mass):
+                    continue
+                pairs.append(f"{value}|{name}")
+                pair_masses.append(mass)
+
         out[int(voltage)] = PackDraws(
-            elements, stacked,
-            [component_names[i] for i in order], per_component[order])
+            elements, stacked, ordered_components, ordered_masses,
+            pairs, np.vstack(pair_masses))
     return out
 
 
@@ -925,6 +957,35 @@ def check_draws_match_workbook(model: CompositionModel, params, chemistry: str,
         rows_for(model, params, chemistry, capacity), params, chemistry)
     scope = params.scope
     for voltage, drawn in per_voltage.items():
+        # The cross level is the element level regrouped, so what can go wrong
+        # is the regrouping: every element's pairs must sum to that element.
+        for position, name in enumerate(drawn.elements):
+            mine = [i for i, pair in enumerate(drawn.pairs)
+                    if pair.split("|", 1)[0] == name]
+            summed = drawn.pair_masses[mine].sum(axis=0).mean() if mine else 0.0
+            whole = drawn.element_masses[position].mean()
+            if whole > 0 and abs(summed - whole) / whole > 1e-9:
+                raise SystemExit(
+                    f"{chemistry} {capacity:.0f}kWh {voltage}V {name}: the pairs "
+                    f"sum to {summed:.6f} kg against the element's {whole:.6f}.")
+
+        # SEPARATELY, and not a regression: where a component's element rows sum
+        # to MORE than the component row, the workbook disagrees with itself and
+        # a consumer deriving a remainder gets a negative one. Reported with the
+        # number rather than smoothed away.
+        for position, name in enumerate(drawn.components):
+            mine = [i for i, pair in enumerate(drawn.pairs)
+                    if pair.split("|", 1)[1] == name]
+            if not mine:
+                continue
+            resolved = drawn.pair_masses[mine].sum(axis=0).mean()
+            whole = drawn.component_masses[position].mean()
+            if whole > 0 and (resolved - whole) / whole > 0.001:
+                print(f"    [{chemistry}] {name} at {capacity:.0f}kWh {voltage}V: "
+                      f"its elements sum to {resolved:.2f} kg against the "
+                      f"component's {whole:.2f}, {100*(resolved-whole)/whole:+.1f}% "
+                      "-- the workbook disagrees with itself here")
+
         here = rows[rows["voltage_v"] == voltage]
         for code, names, masses, column in (
                 (scope.element_parameter_code, drawn.elements,
@@ -1461,7 +1522,14 @@ def main(argv: list[str] | None = None) -> int:
                         drawn.component_masses.T.astype(np.float32))
                 (directory / f"{stem}_components.txt").write_text(
                     "\n".join(drawn.components))
-                n_draw_files += 2
+                # The cross of the two, for the recovery model: it needs the
+                # mass of an element WITHIN a component, and neither level on
+                # its own can answer that.
+                np.save(directory / f"{stem}_pair_mass_draws.npy",
+                        drawn.pair_masses.T.astype(np.float32))
+                (directory / f"{stem}_pairs.txt").write_text(
+                    "\n".join(drawn.pairs))
+                n_draw_files += 3
 
             # Built PER YEAR from the draws, not copied and scaled. The
             # improvement has to reach the statistics as a distribution or the
@@ -1568,7 +1636,11 @@ def main(argv: list[str] | None = None) -> int:
                         drawn.component_masses.T.astype(np.float32))
                 (directory / f"{stem}_components.txt").write_text(
                     "\n".join(drawn.components))
-                n_unknown_draw_files += 2
+                np.save(directory / f"{stem}_pair_mass_draws.npy",
+                        drawn.pair_masses.T.astype(np.float32))
+                (directory / f"{stem}_pairs.txt").write_text(
+                    "\n".join(drawn.pairs))
+                n_unknown_draw_files += 3
     print(f"  wrote {n_unknown_draw_files} per-draw arrays for the chemistries "
           "with no composition of their own -- packaging only, active materials "
           "zero")
