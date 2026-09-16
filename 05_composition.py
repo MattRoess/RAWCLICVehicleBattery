@@ -1392,8 +1392,8 @@ def main(argv: list[str] | None = None) -> int:
     print("Capacity    : the workbook's own anchors "
           f"{[int(c) for c in model._series.capacities]} kWh. Segment capacity, the "
           "range target and the\n              fitted curve are NOT here -- they are "
-          "fleet questions and live in\n              06_segment_capacity.py, which "
-          "RAWCLICStockAndFlow supersedes.")
+          "fleet questions, answered per\n              draw by "
+          "RAWCLICStockAndFlow's 04_04.")
     print(f"Chemistries : {len(chemistries)} with composition -- {chemistries}")
     if export.write_unknown_chemistries:
         print(f"              {len(missing)} marked unknown -- {missing}: packaging "
@@ -1649,9 +1649,9 @@ def main(argv: list[str] | None = None) -> int:
 
     # ------------------------------------------------------------- figures
     # Built here, not read back from disk. The figures used to re-read the
-    # segment-year files, which tied them to an output that has since moved to
-    # 06_segment_capacity.py -- and which had already let them drift from the
-    # rules the files carried.
+    # segment-year files, which tied them to an output this project no longer
+    # produces -- and which had already let them drift from the rules the files
+    # carried.
     drawn = 0
 
     # COMPOSITION OVER TIME, AT A HELD CAPACITY. Not a segment: a segment's
