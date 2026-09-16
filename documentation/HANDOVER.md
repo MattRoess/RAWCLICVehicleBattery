@@ -1,10 +1,10 @@
 # Handover — RAWCLICVehicleBattery
 
-Written 2026-09-10, superseding the earlier 09-10 version. For resuming on the
-**office Mac on Monday 2026-09-14**.
+Written 2026-09-10, last revised **2026-09-16**. The Monday it was written for
+has passed; this is the current state.
 
-State verified against the repository and against runs made today, not
-remembered. For how each chemistry develops over time, read
+State verified against the repository and against runs made on the date of each
+revision, not remembered. For how each chemistry develops over time, read
 [`CHEMISTRY_OVER_TIME.md`](CHEMISTRY_OVER_TIME.md). For the methods and the reasoning, read
 [`METHODOLOGY.md`](METHODOLOGY.md).
 
@@ -61,7 +61,7 @@ The project lives in iCloud Drive, so the whole folder syncs, `data/` and
 
 ```bash
 cd "/Users/rm/Documents/GitHub/RAWCLICVehicleBattery"   # == the iCloud path
-git pull                                                # branch composition-distributions
+git pull                                                # branch main
 ls data/raw/                                            # the .xlsx and the .csv
 ./.venv/bin/python 00_parameters.py
 ```
@@ -93,7 +93,7 @@ ls data/raw/                                            # the .xlsx and the .csv
 ## 2. Running it
 
 ```bash
-./.venv/bin/python 00_parameters.py                 # always first, validates 128 settings
+./.venv/bin/python 00_parameters.py                 # always first, validates 119 settings
 ./.venv/bin/python 99_check_environment.py
 ./.venv/bin/python 01_draw_battery_structure.py
 ./.venv/bin/python 02_composition_by_capacity.py
@@ -134,19 +134,27 @@ Then `importlib.import_module('05_composition').main([])`. Verified today: exit
 
 ## 3. Where things stand
 
-Repository: <https://github.com/MattRoess/RAWCLICVehicleBattery>. Branch
-**`composition-distributions`**, ahead of `main` and **pushed**. For
-what is on it: `git log --oneline main..HEAD` — a count written here goes stale.
+Repository: <https://github.com/MattRoess/RAWCLICVehicleBattery>. **Work is on
+`main` now** — `composition-distributions` was merged and the branch still
+exists but is behind. For what has landed: `git log --oneline` — anything
+written here goes stale.
 
-Today's commits, newest first:
+The run of commits that built the current state, newest first:
 
 | commit | what |
 |---|---|
-| `be418ad` | the segment capacity work moved out of `05` into `06_segment_capacity.py` |
-| `38a0575` | the consolidated files finally get the pack rules; 200 kWh for LMFP only; CRM-over-time figures removed |
-| `5a32ea8` | this handover |
+| `3218cda` | stop pointing at the deleted `06_segment_capacity.py` |
+| `6fbfb60` | write the element inside the component, stop clipping a residual |
+| `9041c2a` | export draws for the two chemistries with no composition of their own |
+| `5584baf` | **delete `06_segment_capacity.py`** and the eleven parameters only it read |
+| `3785f40` | write the component level beside the elements, and guard both |
+| `bec5ca0` | draw the packaging trust for sodium and solid-state |
+| `8a7fa98` | `CHEMISTRY_OVER_TIME.md` |
+| `b1fda81` | carry the improvement's uncertainty into the CSV statistics |
+| `445510d` | put the persisted draws through the pack rules, and write them in kg |
+| `a5dd51c` | the distribution figures have a year |
+| `38a0575` | the consolidated files get the pack rules; 200 kWh for LMFP only |
 | `534e5a0` | composition at held capacity; improvement drawn, not asserted; structure follows weight; 400/800 V |
-| `892df4e` | capacity scenarios `saturate` / `grow_low` / `grow_high`, A–D only |
 | `1f693c9` | sodium/solid-state claims, shared-parts distribution, component `mass_scale` fix |
 
 ### What `05` stopped doing, and why
@@ -186,6 +194,13 @@ RAWCLICStockAndFlow's `src/battery_capacity.py`, as a five-level discrete
 mixture measured from EV_details.csv with a drawn growth rate and plateau year.
 That is a better answer than the fit, and it lives in the project that knows the
 fleet.
+
+**As of 2026-09-16 `04_04` carries the modelling for it**, so nothing in this
+project needs to answer a capacity question at all. `05`'s run header said as
+late as `3218cda` that the segment work "lives in `06_segment_capacity.py`" —
+a printed line naming a deleted file, which sends whoever reads the run output
+looking for something that is not there. It now names `04_04` instead. **If you
+find another reference to `06`, it is stale; there are none left in the code.**
 
 > **Its two defects are why it was never the deliverable, and they are the
 > reason not to revive it from history without rewriting it.** The capacity
@@ -372,10 +387,10 @@ NMC high 339.
 **Both moved to `06_segment_capacity.py`, and went with it when that file was
 deleted on 2026-09-14. Recorded because the reasoning still matters:**
 
-4. **Sodium and solid-state capacity is a constant 86.4 kWh in segment C for
-   every year 2020–2070.** `range_saturated_capacities()` fires on
-   `if unknown and ...`, so it applies to those two chemistries and to no others,
-   and the line that sets it has **no year in it**:
+4. **Sodium and solid-state capacity was a constant 86.4 kWh in segment C for
+   every year 2020–2070.** `range_saturated_capacities()` fired on
+   `if unknown and ...`, so it applied to those two chemistries and to no others,
+   and the line that set it had **no year in it**:
    ```python
    saturated = wh_per_km * 600 / 1000      # wh_per_km: one median, no year
    ```
@@ -418,9 +433,10 @@ deleted on 2026-09-14. Recorded because the reasoning still matters:**
     registrations.
 11. **`battery_size_map` is low for every segment** — JB +23%, JC +21%, JE +24%.
     Changing it moves published results in RAWCLICStockAndFlow.
-12. **Stock-and-flow stage 04 is Matthias's own.** He is starting it fresh.
-    **Nothing about it belongs in this file, and no analysis of it should be
-    offered unless he asks.**
+12. **Stock-and-flow stage 04 is Matthias's own, and as of 2026-09-16 `04_04`
+    exists with all the modelling.** Capacity per segment per year is answered
+    there, per draw. **Nothing about it belongs in this file, and no analysis of
+    it should be offered unless he asks.**
 
 ---
 
@@ -428,7 +444,7 @@ deleted on 2026-09-14. Recorded because the reasoning still matters:**
 
 | | |
 |---|---|
-| `src/params_schema.py` | **the file to edit.** 128 settings, each with its own comment; `00_parameters.py` validates every one |
+| `src/params_schema.py` | **the file to edit.** 119 settings, each with its own comment; `00_parameters.py` validates every one |
 | `src/composition.py` | composition at any capacity, with uncertainty. `weights_at()` takes `year_factor_draws`; `element_draws_at()` returns the draws themselves |
 | `src/ev_details.py` | the vehicle table: parsing, smoothing, the fitted curve. **`05` does not import it** — only `03_capacity_by_chemistry.py` does |
 | `src/scenarios.py` | the three chemistry-share scenarios |
