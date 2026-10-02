@@ -1,7 +1,11 @@
 # Handover — RAWCLICVehicleBattery
 
-Written 2026-09-10, last revised **2026-09-16**. The Monday it was written for
+Written 2026-09-10, last revised **2026-10-02**. The Monday it was written for
 has passed; this is the current state.
+
+**Sodium-ion changed on 2026-10-02: it is now two cells built from literature,
+`Na_ion_layered` and `Na_ion_prussian_white`, written beside the old `Na_ion`.
+Read §7 for everything about sodium. §0 still governs how to work.**
 
 State verified against the repository and against runs made on the date of each
 revision, not remembered. For how each chemistry develops over time, read
@@ -52,6 +56,25 @@ same thing: he had already said what he wanted and it was not acted on. He
 said the composition is per capacity in the morning; the whole segment
 apparatus kept running until the evening.
 
+**2026-10-02, three more, and he found each one, not a test.**
+
+- **The product-structure diagram was not updated.** `01` reads
+  `unknown_chemistry_template`, which does not contain the two new cells, so it
+  went on saying "NOT KNOWN" and "no composition exists" for sodium and drew
+  neither chemistry nor the new component. It was known while editing, was
+  answered by one line that only stopped the cells being called workbook
+  chemistries, and the report said exactly that and nothing about the gap. **When
+  a chemistry is added, grep every reader of `unknown_chemistry_template` and
+  `chemistries_without_composition` and list each as done or not done in the
+  report. A summary that is true of what was changed and silent about what was
+  not is a failure.**
+- **A proof at one capacity understated a rejection rate twenty-fold.**
+  Negative-remainder draws were 0.5% of the layered cell at 80 kWh and 9.6% across
+  the five anchors, almost all of it at 25 kWh. Check every anchor, not the
+  convenient one.
+- **"The workbook" meant two things in one session**: the WP3 lithium workbook in
+  `data/raw/`, and a new spreadsheet about sodium. See the glossary in §7.
+
 ---
 
 ## 1. Picking up on the office Mac
@@ -93,7 +116,7 @@ ls data/raw/                                            # the .xlsx and the .csv
 ## 2. Running it
 
 ```bash
-./.venv/bin/python 00_parameters.py                 # always first, validates 119 settings
+./.venv/bin/python 00_parameters.py                 # always first, validates 122 settings
 ./.venv/bin/python 99_check_environment.py
 ./.venv/bin/python 01_draw_battery_structure.py
 ./.venv/bin/python 02_composition_by_capacity.py
@@ -103,7 +126,14 @@ ls data/raw/                                            # the .xlsx and the .csv
 ```
 
 **`05_composition.py` is the one that matters.** It writes the consolidated
-files, the per-draw arrays and all 18 figures.
+files, the per-draw arrays and all 22 figures.
+
+`01`-`04` take seconds each and none reads another's output, so their order does
+not matter; `99` is read-only and says to run it after `00`. Measured 2026-10-02
+in a sandbox: `01` 1 s, `02` 2 s, `03` 11 s, `04` 2 s, `05` about 30 s at 2,000
+draws, all exit 0. **`05` at 200,000 draws has not been run since the sodium cells
+arrived**; they add statistics for every anchor and year, so expect it to take
+longer than before, by an amount nobody has measured.
 
 **Its runtime at 200,000 draws has not been timed.** The last measured figure
 (5 min 15 s) was for the pre-merge `03` and does not carry over — `05` now does
@@ -127,8 +157,10 @@ def patched():
 ps.current = patched
 ```
 
-Then `importlib.import_module('05_composition').main([])`. Verified today: exit
-0, 9 consolidated files, 35 draw arrays, 18 figures.
+Then `importlib.import_module('05_composition').main([])`. Verified 2026-10-02:
+exit 0, 11 consolidated CSVs (682 files with their draw arrays), 22 figures. For
+`01`-`04` the same idea needs only `paths.output_dir` pointed somewhere else.
+The result no longer depends on `PYTHONHASHSEED` (§7).
 
 ---
 
@@ -143,6 +175,10 @@ The run of commits that built the current state, newest first:
 
 | commit | what |
 |---|---|
+| `d0a0432` | the product structure shows the two sodium cells and the unitemised component |
+| `f928a1d` | drop the LMFP lithium override: the workbook is fixed at source |
+| `8b34020` | **two sodium-ion cells built from literature**, every input drawn; the hash seed fixed |
+| `bc2a0a9` | the sodium research the cells are built from |
 | `3218cda` | stop pointing at the deleted `06_segment_capacity.py` |
 | `6fbfb60` | write the element inside the component, stop clipping a residual |
 | `9041c2a` | export draws for the two chemistries with no composition of their own |
@@ -355,15 +391,22 @@ Supporting measurements, same source:
 - segment F runs at **1256 €/kWh** against 625–790 in A–C — the large segments
   are not price-constrained, which is why they do not grow
 
-### The two LMFP corrections still stand
+### One LMFP correction stands, and the other is gone
 
-Both override the source and both live in parameters, so a WP3 revision removes
-them: lithium pinned at **4.40%** of cathode (stoichiometry; the workbook's 3.45%
-is 22% short and LMFP cannot be the one exception), and cell density pinned at
-**270 Wh/kg** (the workbook implies 336, which would make LMFP lighter per kWh
-than NMC mid-Ni). Correcting the density **rescales the cell**, because kg/kWh is
-one over Wh/kg. Ordering restored: LFP 233, LMFP 270, NMC low 285, NMC mid 311,
-NMC high 339.
+**Cell density is pinned at 270 Wh/kg** (the workbook implies 336, which would
+make LMFP lighter per kWh than NMC mid-Ni). It overrides the source and lives in
+a parameter, so a WP3 revision removes it. Correcting the density **rescales the
+cell**, because kg/kWh is one over Wh/kg. Ordering restored: LFP 233, LMFP 270,
+NMC low 285, NMC mid 311, NMC high 339.
+
+**The lithium override is removed (2026-10-02, `f928a1d`).** It pinned LMFP's
+cathode lithium at 4.40% because the workbook's 3.45% was 22% short. The diagnosis
+was one element too narrow -- oxygen and phosphorus were short by the same factor
+-- and the workbook's five LMFP cathode rows were corrected at the source on
+2026-09-17, so lithium arrives at 4.408% on its own. Measured with and without it
+at 80 kWh: 6.284 against 6.273 kg of lithium, and the cathode's elements summing
+to 100.000% against 99.992% of the component. Small, which is why nothing failed;
+but this section said both corrections stood for two weeks after one had not.
 
 ---
 
@@ -382,7 +425,8 @@ NMC high 339.
    confirmed.**
 3. **Sodium's own curve was overwritten.** The 160 / 200 / 220 Wh/kg at
    2030/2040/2050 is gone, replaced by the 2020→2070 ramp. **Flagged, not
-   confirmed.**
+   confirmed.** The two sodium cells built from literature take the same ramp, for
+   the structure scaling only; their cell mass is drawn (§7).
 
 **Both moved to `06_segment_capacity.py`, and went with it when that file was
 deleted on 2026-09-14. Recorded because the reasoning still matters:**
@@ -414,9 +458,10 @@ deleted on 2026-09-14. Recorded because the reasoning still matters:**
 
 **Still the real gap:**
 
-6. **Active materials for sodium and solid-state.** Cathode, anode and
-   electrolyte are `unknownBatteryMaterial`. The split is not known for either.
-   **The numbers have to come from literature or WP3.**
+6. **Active materials for sodium and solid-state.** **Sodium: done 2026-10-02, as
+   two cells built from literature (§7) -- a scenario, not a bill of materials.**
+   `Na_ion` itself is unchanged and still has none. **Solid-state is still
+   `unknownBatteryMaterial` and still needs a source.**
 
 **Older, still open:**
 
@@ -444,7 +489,7 @@ deleted on 2026-09-14. Recorded because the reasoning still matters:**
 
 | | |
 |---|---|
-| `src/params_schema.py` | **the file to edit.** 119 settings, each with its own comment; `00_parameters.py` validates every one |
+| `src/params_schema.py` | **the file to edit.** 122 settings, each with its own comment; `00_parameters.py` validates every one |
 | `src/composition.py` | composition at any capacity, with uncertainty. `weights_at()` takes `year_factor_draws`; `element_draws_at()` returns the draws themselves |
 | `src/ev_details.py` | the vehicle table: parsing, smoothing, the fitted curve. **`05` does not import it** — only `03_capacity_by_chemistry.py` does |
 | `src/scenarios.py` | the three chemistry-share scenarios |
@@ -454,14 +499,166 @@ deleted on 2026-09-14. Recorded because the reasoning still matters:**
 | `technology.structure_reference_chemistry` | sets the iron level for all nine |
 | `technology.pack_voltages_v` / `copper_scale_by_voltage` | 400 V and 800 V |
 | `technology.module_enclosure_split` | the 50/50 Al/Fe judgement |
-| `export.unknown_chemistry_template` | what may be claimed about sodium and solid-state, and why |
+| `export.unknown_chemistry_template` | what may be claimed about the two chemistries with no composition, and why |
+| `src/sodium_composition.py` | **the sodium cell model and its invariants**, read by both output paths of `05` |
+| `technology.sodium_cell`, `technology.sodium_cathode` | every sodium input, each saying whether it is sourced, measured or assumed |
+| `export.literature_chemistry_template` | the packaging claims of the two sodium cells |
 | `export.capacity_scenario` | `saturate` / `grow_low` / `grow_high` |
 | `technology.cell_density_override_wh_per_kg` | where the workbook's density is not believed — LMFP only |
 | `data/raw/` | the two inputs — **not in git**, supplied via iCloud |
 | `data/composition/` | `element_draws/` — generated by `05` |
-| `data/consolidated/` | **the deliverable** — nine files in the workbook schema plus their draw arrays |
-| `figures/` | 18 figures — generated |
+| `data/consolidated/` | **the deliverable** — eleven files in the workbook schema (two of them sodium cells built from literature) plus their draw arrays |
+| `figures/` | 22 figures — generated |
 
 **No data file is ever committed.** `data/` and `figures/` are excluded at the
 folder, so a new output cannot slip through by having an extension nobody
 listed.
+
+---
+
+## 7. Sodium-ion, built from literature (2026-10-02)
+
+Sodium-ion had its packaging claimed from LFP and its cathode, anode and
+electrolyte left as `unknownBatteryMaterial`, because no source existed. One
+arrived on 2026-10-02 and two cells are now built from it. **They are a
+scenario, not a bill of materials**: the report says in terms that no audited
+whole-cell breakdown of a commercial sodium-ion cell is public, so nothing here
+copies one.
+
+### Words that were used for two things
+
+| | means |
+|---|---|
+| **the workbook** | the WP3 lithium workbook in `data/raw/` -- the source of the seven lithium chemistries. Nothing else. |
+| **the sodium sheet** | `documentation/Sodium_Ion_Battery_Cell_Composition.xlsx`. **Not data, and not used** (below). Ignored by git (`*.xlsx`). |
+| **the report** / **the addendum** | `Sodium_Ion_Battery_CATL_Investigation.md` and `Sodium_Ion_Cathode_Capacity_Voltage_Addendum.md`, both in `documentation/` and committed. The report ranks every source by tier. |
+
+### What exists
+
+- **`Na_ion_layered` and `Na_ion_prussian_white`**, written beside `Na_ion`, which is
+  **unchanged** and still packaging-only. Each is one `consolidated_<name>.csv`
+  plus 30 draw arrays and 30 name files, like every other chemistry.
+- **Packaging is claimed exactly as `Na_ion`'s is** (LFP's casing, separator,
+  collectors and pack hardware; Al replaces Cu on the anode collector at x0.4764
+  for equal conductance).
+- **Cathode, anode and electrolyte are an electrochemical mass balance**, in
+  `src/sodium_composition.py`, read by both output paths of `05` so the CSV and
+  the arrays cannot disagree:
+
+      cell        = E / D                       D  cell energy density
+      cathode     = E / (c * (Vc - Va))         c  mAh/g, Vc cathode V vs Na, Va anode potential
+      anode       = (E / (Vc - Va)) / qa * NP   qa hard-carbon mAh/g, NP the N/P ratio
+      electrolyte = e * kWh                     only the salt's Na, P, F are itemised
+      remainder   = cell - cathode - anode - electrolyte - packaging
+
+- **The remainder is a component of its own, `batteryCellUnitemised`**: cell mass
+  the electrochemistry does not explain. It exists only for these two cells.
+  Pouring it into the cathode and anode instead -- a split of the whole cell by
+  lithium proportions -- put the cathode 27% too heavy.
+- **Every input is a triangular drawn once per Monte Carlo draw** and shared by
+  every capacity, year and row. `technology.sodium_cell` and `sodium_cathode`
+  say, input by input, whether it is sourced, measured on the lithium workbook,
+  or **assumed**.
+- **Elements written:** layered `Al C Cu F Fe Mn Na Ni O P`; Prussian white
+  `Al C Cu F Fe N Na P`. The rows carry `composition_status`
+  `literature_scenario` and `unitemised_cell_mass`; the consolidated CSV has no
+  status column, so there the remainder is recognised by its component name.
+
+### Decided, and by whom
+
+| decision | his words / what it rests on |
+|---|---|
+| Two full chemistries, separate compositions | "we need two full battery chemistries and compositions". NVP is excluded: research only. |
+| **Where they go is 04_04's question, not the composition's** | Prussian white: stationary and AB cars. Layered oxide: CD, AB, perhaps EF. "CD-segment was more a guess, based on the Ni being critical and so expensive." |
+| Prussian-white formula: ideal Na2Fe[Fe(CN)6] | "we have nothing else". Sodium drawn 1.5 / 2.0 / 2.0. |
+| **200 Wh/kg kept** | "seen in some reports and presentations". The report cites 160 (2021) and 175 (2025); the code's 2020 value is above both. |
+| Full Monte Carlo, 200,000 draws | said twice. Not 2,000, not a sensitivity note. |
+| Layered nickel per formula unit Tri(2/9, 2/9, 0.33) | floor = HiNa's peer-reviewed post-mortem (Tier 1); **the top is weak** (the sodium sheet, and a lab O3 oxide). A nickel-free layered oxide (the addendum's HiNa) is **not** in this chemistry. |
+| Negative-remainder draws conditioned out, not clipped | "1. to 3. seems to be OK" |
+| LMFP lithium override dropped; pushed | "Yes, commit the LMFP change and push". The repository is **public**. |
+
+### What to know before reading a number
+
+- **Conditioning is heavy, and it sits at 25 kWh.** About 9.4-9.7% of the layered
+  and 18.3-18.8% of the Prussian-white draws are redrawn (measured at 2,000 and
+  20,000 draws; it moves a little with the seed). At 80 kWh alone it is 0.5% and
+  2.8%: the packaging taken from LFP is **0.84 kg/kWh at 25 kWh against 0.50 at
+  80**, so a high density cannot close at small capacities. It moves an input's
+  mean by at most about 1.5% and 2.2%. The cap is 30%, **a design bound I chose**.
+  The density maximum of 220 is an assumption and is what decides this.
+- **The remainder is large and is almost all cell density** (rank correlation
+  -0.88 layered, -0.84 Prussian white): about 65 kg of 416 at 80 kWh in the proof,
+  71 kg in the written file once every anchor is conditioned. The CSV's
+  `Value` for it is every input at its mode, **52.9 kg against a median of 66.9**
+  (layered, 80 kWh, 2020). Use the draws.
+- **Layered-oxide nickel is 23.2 kg [19.4, 28.7] at 80 kWh in 2020**, the same order
+  as a low-Ni NMC pack (27.2 kg) and half a mid-Ni one (43.6). The band is almost
+  entirely the prior on the formula.
+- **The cathode is about 160-180 kg at 80 kWh, not 203.** The lithium workbook's
+  own LFP cathode stores 0.501 Wh/g, the same as the addendum's sodium figure.
+- **The documents disagree.** The addendum corrects the report on HiNa's formula
+  (no nickel, Tier 2-3, against the report's Tier-1 post-mortem with nickel),
+  asserts a Naxtra Ni/Mn/Cu/Fe composition it does not source (the report says
+  that ratio would be speculation), and gives Prussian-white capacity as 150-165
+  mAh/g against the report's 100-150. **The sodium sheet is not data**: it labels a
+  layered oxide "CATL 1st-gen", which the report contradicts; its sodium (3.59% of
+  the cell) is half what its own cathode formula needs (7.13%); it has no
+  source, basis or status columns.
+- **Frame and enclosure iron still scale with the deterministic 200 Wh/kg**, while
+  the drawn cell averages about 4% heavier (415.6 against 400 kg at 80 kWh). The
+  structure does not follow the drawn density.
+- **The hash seed is fixed.** `unknown_scale_draws` seeded with `hash(chemistry)`,
+  which Python randomises per process (19, 697, 922 for `Na_ion` in three runs), so
+  the same settings gave different packaging-trust draws. It is crc32 now: the
+  draws of `Na_ion` and `solid_state` differ from every earlier run and are
+  identical from here on (984 of 984 outputs byte-identical under two hash
+  seeds). That exposed `check_unknown_draws_match_workbook`, which divided by the
+  trust factor's analytic mean; it uses the realised mean now.
+
+### Figures
+
+`composition_over_time_<chemistry>_80kWh.png` for each cell, its total band taken
+from the draws (adding percentiles is exact for the workbook's comonotonic
+chemistries and wrong for independent inputs). The nickel, manganese, copper and
+whole-battery distribution figures carry both cells as dashed lines, with a note
+only where one is drawn. **`distribution_elements_<chemistry>_80kWh.png`**: every
+element of one cell in a panel of its own, with its band. **`01`'s product
+structure shows all four chemistries built here and the new
+`batteryCellUnitemised` component** (it did not until `d0a0432`).
+
+### Verified, and not
+
+In a sandbox at 2,000 draws, never against `data/` or `figures/`: against the
+unmodified code **0 of 427 lithium files and 0 of 280 fraction arrays changed**;
+the committed state, exported from the index and run alone, exits 0; **13 of 13**
+deliberately broken inputs are refused (the invariants, the sampler, the
+validator, and the drift check on both a cell and a packaging component). Those
+proofs were run outside the repository -- there is no test suite here to hold
+them. **Not verified: any run at 200,000 draws, and its time or memory.**
+
+### Open, in the order I would take them
+
+1. **04_04 (his).** The new file names; splitting the `Na_ion` share between the two
+   cells (the mapping above); removing the name from
+   `battery_chemistry_active_material_unknown` in RAWCLICStockAndFlow's
+   `params_schema.py`; then retiring `Na_ion` here. Nothing reads the new files
+   yet.
+2. **Recovery.** The recovery battery case has coefficients for Ni, Mn, Cu, Fe, C,
+   Al, P and O and **none for Na, F or N**; the report has none for sodium-ion
+   recycling, so a source is needed. The layered oxide puts nickel, copper and
+   manganese back, which contradicts the stock-and-flow design note's
+   "sodium-ion carries no critical or strategic raw material" (§3b of
+   `DESIGN_chemistries_without_composition.md`) -- true only for Prussian white.
+   That note is stage 04's and has not been touched.
+3. **Stale in this repository, not fixed:** `CHEMISTRY_OVER_TIME.md` (about lines
+   218 and 293-294: "unknownBatteryMaterial ... for both chemistries");
+   `METHODOLOGY.md` §6.4 and the sodium rows of §6.3 and its summary ("no
+   composition at all"), and the status vocabulary at about line 385, which does
+   not list `literature_scenario` or `unitemised_cell_mass`.
+4. **Replace the four assumed inputs with sources**: N/P, the anode potential, the
+   electrolyte maximum, and the density maximum of 220.
+5. **Run `05` at 200,000 draws and time it.**
+6. **The mutation tests are not in the repository.** Add them as a test file if
+   wanted.
+7. **The composition-over-time stack colours nickel a pale grey, nearly invisible
+   against the band.** Not changed.
