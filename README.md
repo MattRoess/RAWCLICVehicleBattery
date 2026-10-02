@@ -22,7 +22,7 @@ It is the battery counterpart to `RAWCLICVehicleComposition` (whole car) and
 |---|---|
 | `00_parameters.py` | Turns `src/params_schema.py` into `params.xlsx`, **and validates it**. `--check` validates and prints without writing. |
 | `99_check_environment.py` | Checks the interpreter, the pinned packages and the workbook, and prints the workbook's real structure. Writes nothing. |
-| `01_draw_battery_structure.py` | Draws every component of the BEV battery, labelled with the workbook's own `Layer 2` codes. |
+| `01_draw_battery_structure.py` | One figure of every chemistry that has a composition, side by side: the parts of its battery and the chemical elements each part is made of. Names only -- no weights, no ranges -- and it needs nothing from the later steps. |
 | `02_composition_by_capacity.py` | The composition at **any** capacity, with a Monte Carlo band. Prints a table and writes two figures. |
 | `03_capacity_by_chemistry.py` | The same, split by cathode chemistry — LFP, NCA, NMC_middle, NMC_high — where at least 5 distinct models carry it. Prints the table too. |
 | `04_chemistry_scenarios.py` | Three chemistry scenarios to 2070, and the mix arriving for recycling once vehicle life and second life are applied. **Assumption, not data.** |

@@ -4,8 +4,9 @@ Written 2026-09-10, last revised **2026-10-02**. The Monday it was written for
 has passed; this is the current state.
 
 **Sodium-ion changed on 2026-10-02: it is now two cells built from literature,
-`Na_ion_layered` and `Na_ion_prussian_white`, written beside the old `Na_ion`.
-Read §7 for everything about sodium. §0 still governs how to work.**
+`Na_ion_layered` and `Na_ion_prussian_white`, and the old packaging-only `Na_ion`
+is gone from this repository's composition. Read §7 for everything about sodium.
+§0 still governs how to work.**
 
 State verified against the repository and against runs made on the date of each
 revision, not remembered. For how each chemistry develops over time, read
@@ -75,6 +76,35 @@ apparatus kept running until the evening.
 - **"The workbook" meant two things in one session**: the WP3 lithium workbook in
   `data/raw/`, and a new spreadsheet about sodium. See the glossary in §7.
 
+**The same afternoon, five more, and again he found them.**
+
+- **`Na_ion` was kept, unasked, "as a safeguard".** He had said two chemistries,
+  and had to say "Na_ion is gone" before it went. It is out of the settings, `05`,
+  the figures and the templates; every other output was byte-identical.
+- **`02` and `04` enumerate chemistries too, and were missed the same way.** `02`
+  drew neither sodium cell -- an earlier audit judged it unaffected without
+  opening it. `04`'s footnote still said sodium has no composition after `Na_ion`
+  left `chemistries_without_composition`, and its coverage line had quietly moved;
+  that was found only by running `01`-`04` and comparing with the baseline, which
+  is the check that should have come first. **A change to a setting is not
+  finished until every script has been run and every figure that moved has been
+  looked at.**
+- **The product-structure diagram explained itself in the project's own jargon**:
+  "the workbook", `c-p`, `e-c`, "Layer 1", "built here". His words: "Who the hell
+  knows what the workbook is now?" **A figure's wording is plain or it is wrong.**
+  It was rebuilt from scratch (§7) and carries its whole explanation in two short
+  lines.
+- **A report that said what was changed and not what was left out**, once more.
+  Every report on this work now lists each consumer as done or not done.
+- **`01` was made to depend on `05`, and then to run Monte Carlo.** He ran it and
+  it stopped with "run 05 first". His words: "1 has to run before 5", "1 to 5 is it
+  such hard to get. Build up step by step", "01 is NO MC", "just draw a figure",
+  "01 is draw battery structure and nothing else", and "I do not want that code
+  copies run in two different code". The detour moved code out of `05` and edited it
+  in six places for a figure that needed none of it; it was undone, and `05` was
+  checked byte-identical to before. **Take the smallest step that works, prove it,
+  then take the next -- and a figure at step 1 never reads step 5.**
+
 ---
 
 ## 1. Picking up on the office Mac
@@ -116,7 +146,7 @@ ls data/raw/                                            # the .xlsx and the .csv
 ## 2. Running it
 
 ```bash
-./.venv/bin/python 00_parameters.py                 # always first, validates 122 settings
+./.venv/bin/python 00_parameters.py                 # always first, validates 124 settings
 ./.venv/bin/python 99_check_environment.py
 ./.venv/bin/python 01_draw_battery_structure.py
 ./.venv/bin/python 02_composition_by_capacity.py
@@ -126,12 +156,14 @@ ls data/raw/                                            # the .xlsx and the .csv
 ```
 
 **`05_composition.py` is the one that matters.** It writes the consolidated
-files, the per-draw arrays and all 22 figures.
+files, the per-draw arrays and all 21 figures.
 
 `01`-`04` take seconds each and none reads another's output, so their order does
-not matter; `99` is read-only and says to run it after `00`. Measured 2026-10-02
-in a sandbox: `01` 1 s, `02` 2 s, `03` 11 s, `04` 2 s, `05` about 30 s at 2,000
-draws, all exit 0. **`05` at 200,000 draws has not been run since the sodium cells
+not matter. `01` is names only -- the parts of each chemistry and the elements each
+is made of, with no weights and no Monte Carlo -- and needs nothing from any later
+step. `99` is read-only and says to run it after `00`. Measured 2026-10-02 in a
+sandbox, in the order 00, 01, 02, 03, 04, 05, 99 from an empty folder: all exit 0;
+`01` 1 s, `02` 4 s, `03` 12 s, `04` 1 s, `05` 27 s at 2,000 draws. **`05` at 200,000 draws has not been run since the sodium cells
 arrived**; they add statistics for every anchor and year, so expect it to take
 longer than before, by an amount nobody has measured.
 
@@ -157,9 +189,10 @@ def patched():
 ps.current = patched
 ```
 
-Then `importlib.import_module('05_composition').main([])`. Verified 2026-10-02:
-exit 0, 11 consolidated CSVs (682 files with their draw arrays), 22 figures. For
-`01`-`04` the same idea needs only `paths.output_dir` pointed somewhere else.
+Then `importlib.import_module('05_composition').main([])`. Verified 2026-10-02,
+after `Na_ion` was removed: exit 0, 10 consolidated CSVs (621 files with their
+draw arrays), 21 figures. For `01`-`04` the same idea needs only
+`paths.output_dir` pointed somewhere else.
 The result no longer depends on `PYTHONHASHSEED` (§7).
 
 ---
@@ -192,6 +225,11 @@ The run of commits that built the current state, newest first:
 | `38a0575` | the consolidated files get the pack rules; 200 kWh for LMFP only |
 | `534e5a0` | composition at held capacity; improvement drawn, not asserted; structure follows weight; 400/800 V |
 | `1f693c9` | sodium/solid-state claims, shared-parts distribution, component `mass_scale` fix |
+
+**Not in this table: the work after `bafe50f`** -- `Na_ion` removed, the two
+sodium cells drawn in `02`, `src/unknown_chemistries.py`, the rebuilt structure
+figure (`01` and `src/overview_figure.py`), the corrected wording in `04`. It was
+uncommitted when this was written; `git status` says whether it still is.
 
 ### What `05` stopped doing, and why
 
@@ -460,7 +498,7 @@ deleted on 2026-09-14. Recorded because the reasoning still matters:**
 
 6. **Active materials for sodium and solid-state.** **Sodium: done 2026-10-02, as
    two cells built from literature (§7) -- a scenario, not a bill of materials.**
-   `Na_ion` itself is unchanged and still has none. **Solid-state is still
+   `Na_ion` no longer exists as a chemistry here. **Solid-state is still
    `unknownBatteryMaterial` and still needs a source.**
 
 **Older, still open:**
@@ -489,7 +527,7 @@ deleted on 2026-09-14. Recorded because the reasoning still matters:**
 
 | | |
 |---|---|
-| `src/params_schema.py` | **the file to edit.** 122 settings, each with its own comment; `00_parameters.py` validates every one |
+| `src/params_schema.py` | **the file to edit.** 127 settings, each with its own comment; `00_parameters.py` validates every one |
 | `src/composition.py` | composition at any capacity, with uncertainty. `weights_at()` takes `year_factor_draws`; `element_draws_at()` returns the draws themselves |
 | `src/ev_details.py` | the vehicle table: parsing, smoothing, the fitted curve. **`05` does not import it** — only `03_capacity_by_chemistry.py` does |
 | `src/scenarios.py` | the three chemistry-share scenarios |
@@ -499,16 +537,19 @@ deleted on 2026-09-14. Recorded because the reasoning still matters:**
 | `technology.structure_reference_chemistry` | sets the iron level for all nine |
 | `technology.pack_voltages_v` / `copper_scale_by_voltage` | 400 V and 800 V |
 | `technology.module_enclosure_split` | the 50/50 Al/Fe judgement |
-| `export.unknown_chemistry_template` | what may be claimed about the two chemistries with no composition, and why |
+| `export.unknown_chemistry_template` | what may be claimed about the one chemistry with no composition (solid-state), and why |
 | `src/sodium_composition.py` | **the sodium cell model and its invariants**, read by both output paths of `05` |
+| `src/unknown_chemistries.py` | what `05` and `02` share for every chemistry that is not in the workbook: the packaging claims, the drawn scale, the sodium inputs; and `CompositionWithCells`, which lets `02` draw the sodium cells, and its names-only `structure()`, which `01` draws from |
+| `src/overview_figure.py` | the structure figure `01` draws: names only, each chemistry that has a composition against its parts and their elements |
+| `drawing.overview_*`, `drawing.component_labels`, `drawing.component_gloss` | the structure figure's size, rows and every word in it |
 | `technology.sodium_cell`, `technology.sodium_cathode` | every sodium input, each saying whether it is sourced, measured or assumed |
 | `export.literature_chemistry_template` | the packaging claims of the two sodium cells |
 | `export.capacity_scenario` | `saturate` / `grow_low` / `grow_high` |
 | `technology.cell_density_override_wh_per_kg` | where the workbook's density is not believed — LMFP only |
 | `data/raw/` | the two inputs — **not in git**, supplied via iCloud |
 | `data/composition/` | `element_draws/` — generated by `05` |
-| `data/consolidated/` | **the deliverable** — eleven files in the workbook schema (two of them sodium cells built from literature) plus their draw arrays |
-| `figures/` | 22 figures — generated |
+| `data/consolidated/` | **the deliverable** — ten files in the workbook schema (two of them sodium cells built from literature) plus their draw arrays. **Also still holds 61 stale `Na_ion` files** from before the removal; `05` does not clean up (§7, open) |
+| `figures/` | 29 figures after `01`-`05` have run (1, 4, 2, 1 and 21) — generated |
 
 **No data file is ever committed.** `data/` and `figures/` are excluded at the
 folder, so a new output cannot slip through by having an extension nobody
@@ -535,12 +576,17 @@ copies one.
 
 ### What exists
 
-- **`Na_ion_layered` and `Na_ion_prussian_white`**, written beside `Na_ion`, which is
-  **unchanged** and still packaging-only. Each is one `consolidated_<name>.csv`
-  plus 30 draw arrays and 30 name files, like every other chemistry.
-- **Packaging is claimed exactly as `Na_ion`'s is** (LFP's casing, separator,
-  collectors and pack hardware; Al replaces Cu on the anode collector at x0.4764
-  for equal conductance).
+- **`Na_ion_layered` and `Na_ion_prussian_white`.** Each is one
+  `consolidated_<name>.csv` plus 30 draw arrays and 30 name files, like every
+  other chemistry. **`Na_ion` is gone**: removed on his instruction ("Na_ion is
+  gone, we have now two chemistries") from the settings, `05`, the figures and the
+  templates, having been kept unasked as a safeguard. Two things still carry the
+  name: the scenario share series in `scenarios.scenario_2` and `scenario_3`, and
+  **61 stale files in `data/consolidated/`** from before the removal (both under
+  Open, below).
+- **Packaging is claimed from LFP** (its casing, separator, collectors and pack
+  hardware; Al replaces Cu on the anode collector at x0.4764 for equal
+  conductance) -- which is what the old `Na_ion` claimed, and all it did.
 - **Cathode, anode and electrolyte are an electrochemical mass balance**, in
   `src/sodium_composition.py`, read by both output paths of `05` so the CSV and
   the arrays cannot disagree:
@@ -576,6 +622,8 @@ copies one.
 | Layered nickel per formula unit Tri(2/9, 2/9, 0.33) | floor = HiNa's peer-reviewed post-mortem (Tier 1); **the top is weak** (the sodium sheet, and a lab O3 oxide). A nickel-free layered oxide (the addendum's HiNa) is **not** in this chemistry. |
 | Negative-remainder draws conditioned out, not clipped | "1. to 3. seems to be OK" |
 | LMFP lithium override dropped; pushed | "Yes, commit the LMFP change and push". The repository is **public**. |
+| **`Na_ion` removed** | "Na_ion is gone we have now to chemistries!!" |
+| **The structure figure shows every chemistry that has a composition, part by part, in plain words -- structure only** | "I want in this figure the chemistries, which we have the composition so one fully understands each of them ... Have the different components of the respective chemistiores." Of the legend: "Who the hell knows what the workbook is now?" Of its scope: "01 is draw battery structure and nothing else", then "yes, structure only". |
 
 ### What to know before reading a number
 
@@ -622,9 +670,31 @@ from the draws (adding percentiles is exact for the workbook's comonotonic
 chemistries and wrong for independent inputs). The nickel, manganese, copper and
 whole-battery distribution figures carry both cells as dashed lines, with a note
 only where one is drawn. **`distribution_elements_<chemistry>_80kWh.png`**: every
-element of one cell in a panel of its own, with its band. **`01`'s product
-structure shows all four chemistries built here and the new
-`batteryCellUnitemised` component** (it did not until `d0a0432`).
+element of one cell in a panel of its own, with its band.
+
+**`battery_product_structure.png` is a different figure since 2026-10-02**, built
+from scratch, and it is **structure only**: names, no weights, no ranges, no Monte
+Carlo. One column per chemistry that has a composition (seven lithium, two sodium),
+one row per part, and in each box the chemical elements the data names for that
+part ("not broken down" where the data does not split the part, a dash where the
+chemistry has no such part). The parts and elements come from
+`CompositionWithCells.structure` in `src/unknown_chemistries.py`: for lithium, off
+the composition data; for a sodium cell, off its settings (the cathode formula, the
+salt formula, hard carbon for the anode) and LFP's packaging with the template's
+element swaps; and the enclosure is Al + Fe, as the pack rules make it. **It equals
+the parts and elements `05` delivers for all nine chemistries** (checked against the
+consolidated CSVs, not built from them), and `01` needs nothing from `05` or any
+later step. It refuses a part it has no row for, and the settings refuse a start-up
+in which a chemistry with a composition is left out of `drawing.overview_groups`, so
+a new one cannot be forgotten again. Its whole explanation is two short lines in
+plain words, on his instruction.
+
+**`02` now draws the two sodium cells** (`CompositionWithCells`, in
+`src/unknown_chemistries.py`): a component figure for each cell, and both cells in
+the totals figure, dashed. The blue diamonds on the cell figures are the masses in
+the sodium sheet, an overlay for comparison -- **my reading of "use the different
+reports and data for 02", unconfirmed.** `02` shows the values before the pack
+rules, as it does for lithium; `05`'s are after them.
 
 ### Verified, and not
 
@@ -636,13 +706,34 @@ validator, and the drift check on both a cell and a packaging component). Those
 proofs were run outside the repository -- there is no test suite here to hold
 them. **Not verified: any run at 200,000 draws, and its time or memory.**
 
+After `Na_ion` was removed and the structure figure rebuilt, same sandbox: `05` exits
+0; against a run made before any of the figure work, **621 of 621 consolidated files,
+280 of 280 composition files and 21 of 21 figures are byte-identical**. Run in the order
+00, 01, 02, 03, 04, 05, 99 from an empty folder, **all exit 0**, and `01` draws first, in
+about 2 s, with nothing from `05` there. `structure()` was compared with the parts and
+elements in what `05` delivers: **the same for all nine chemistries**. **6 of 6**
+deliberate tests of `01`'s inputs behaved: an unbroken run draws, and each of five
+breakages is refused with a message that names it -- a part with no row, a chemistry
+left out of the columns, a column for a chemistry that does not exist, the composition
+data missing, an empty legend. `02`-`04` and `99` exit 0; `03` is byte-identical to
+the baseline from before the sodium work; `04`'s figure differs, deliberately (open
+item 1).
+
 ### Open, in the order I would take them
 
-1. **04_04 (his).** The new file names; splitting the `Na_ion` share between the two
-   cells (the mapping above); removing the name from
+1. **04_04 (his), and the scenario shares here.** The new file names; splitting the
+   `Na_ion` share between the two cells (the mapping above); removing the name from
    `battery_chemistry_active_material_unknown` in RAWCLICStockAndFlow's
-   `params_schema.py`; then retiring `Na_ion` here. Nothing reads the new files
-   yet.
+   `params_schema.py`. **`Na_ion` has no composition file any more, so anything
+   reading `consolidated_Na_ion.csv` finds only the 61 stale files until they are
+   deleted or the reader is changed; `05` never cleans its output folder, and
+   deleting them has not been asked.** In this repository the scenarios still have
+   ONE sodium series named `Na_ion` (`scenario_2`, `scenario_3`, and a colour in
+   `scenario_colours`). `04` now counts it as having a composition and says in its
+   footnote that the share is not split between the cells; that is why its figure
+   changed. **The split is his to give** -- by segment group, from his words about
+   Prussian white (stationary, AB) and layered oxide (CD, AB, perhaps EF) -- and
+   has not been invented.
 2. **Recovery.** The recovery battery case has coefficients for Ni, Mn, Cu, Fe, C,
    Al, P and O and **none for Na, F or N**; the report has none for sodium-ion
    recycling, so a source is needed. The layered oxide puts nickel, copper and
@@ -650,10 +741,12 @@ them. **Not verified: any run at 200,000 draws, and its time or memory.**
    "sodium-ion carries no critical or strategic raw material" (§3b of
    `DESIGN_chemistries_without_composition.md`) -- true only for Prussian white.
    That note is stage 04's and has not been touched.
-3. **Stale in this repository, not fixed:** `CHEMISTRY_OVER_TIME.md` (about lines
+3. **Stale in this repository, not fixed:** `README.md` (the `05` row still says
+   "nine files" and that sodium-ion and solid-state are written with empty masses;
+   only the `01` lines were corrected); `CHEMISTRY_OVER_TIME.md` (about lines
    218 and 293-294: "unknownBatteryMaterial ... for both chemistries");
    `METHODOLOGY.md` §6.4 and the sodium rows of §6.3 and its summary ("no
-   composition at all"), and the status vocabulary at about line 385, which does
+   composition at all"), its "Nine CSV files" and "104 parameters", and the status vocabulary at about line 385, which does
    not list `literature_scenario` or `unitemised_cell_mass`.
 4. **Replace the four assumed inputs with sources**: N/P, the anode potential, the
    electrolyte maximum, and the density maximum of 220.
