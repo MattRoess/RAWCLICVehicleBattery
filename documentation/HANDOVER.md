@@ -8,6 +8,35 @@ has passed; this is the current state.
 is gone from this repository's composition. Read §7 for everything about sodium.
 §0 still governs how to work.**
 
+## Where things stand, end of 2026-10-02
+
+- **The code is pushed.** The code last changed in `52cdbc7` (the chemistry list); the
+  docs in the commit after it. `git log --oneline` is the truth; anything counted here
+  was measured in a sandbox at 2,000 draws.
+- **No assistant run wrote to or changed a file in his `data/` or `figures/`** (a move
+  attempt created two empty folders in `data/`, which were removed again). He deleted the stale LMO,
+  NCA and old `Na_ion` files himself (263 files); `data/consolidated/` now holds the
+  five lithium chemistries and solid-state (377 files with the improvement factors) and
+  `data/composition/element_draws/` 200.
+- **His real folders are up to date.** After the last push he ran `00`, `01`-`04` and
+  `05` at 200,000 draws on 2026-10-02 and told me so. Looked at read-only afterwards:
+  8 consolidated CSVs (the two sodium cells, LFP, LMFP, three NMC, solid-state) in 499
+  files, 200 element-draw files and 27 figures, the same counts as the sandbox, none
+  naming LMO or NCA; the draw arrays hold 200,000 draws. `05`'s files were written
+  between 16:09:55 and 16:13:08, **3 min 13 s first to last** -- a lower bound on the
+  run, read off file times, not a timer. Values were not compared; only counts and
+  draws.
+- **Done today:** `Na_ion` replaced by two sodium cells built from literature; `01`
+  rebuilt as a names-only structure figure that runs first; `02` draws the cells; `04`
+  gives sodium as two chemistries; one list of the chemistries we calculate
+  (`scope.chemistries`), LMO and NCA out. §7 has the detail, §0 what went wrong.
+- **Open, all in the Open list at the end of §7, and he takes them next week (from
+  2026-10-05):** the 04_04 adoption (his stage, not to be opened unasked), the shape
+  of the layered rise in small cars (a straight line, my reading), recovery
+  coefficients for Na, F and N, the four assumed sodium inputs, the 02 comparison
+  overlay (my unconfirmed reading), and the stale lines in README, METHODOLOGY and
+  CHEMISTRY_OVER_TIME.
+
 State verified against the repository and against runs made on the date of each
 revision, not remembered. For how each chemistry develops over time, read
 [`CHEMISTRY_OVER_TIME.md`](CHEMISTRY_OVER_TIME.md). For the methods and the reasoning, read
@@ -76,7 +105,7 @@ apparatus kept running until the evening.
 - **"The workbook" meant two things in one session**: the WP3 lithium workbook in
   `data/raw/`, and a new spreadsheet about sodium. See the glossary in §7.
 
-**The same afternoon, six more, and again he found them.**
+**The same afternoon, seven more, and again he found them.**
 
 - **`Na_ion` was kept, unasked, "as a safeguard".** He had said two chemistries,
   and had to say "Na_ion is gone" before it went. It is out of the settings, `05`,
@@ -111,6 +140,11 @@ apparatus kept running until the evening.
   chemistries, which we exclude". There is now one list, `scope.chemistries`, and
   everything follows it (§7). **Which chemistries go in a figure is his decision,
   asked before they are drawn.**
+- **I read the stock-and-flow project** to see who imports `05`. His words: "Do not use
+  stock and flow", "This is before stock and flow". It is downstream and his; nothing in
+  this project needs it, and the code that was being moved out of `05` for that reason
+  was never needed. **He reads every step as it happens. Do not explore his other
+  projects or his data folders unasked; propose and wait.**
 
 ---
 
@@ -170,13 +204,10 @@ not matter. `01` is names only -- the parts of each chemistry and the elements e
 is made of, with no weights and no Monte Carlo -- and needs nothing from any later
 step. `99` is read-only and says to run it after `00`. Measured 2026-10-02 in a
 sandbox, in the order 00, 01, 02, 03, 04, 05, 99 from an empty folder: all exit 0;
-`01` 1 s, `02` 4 s, `03` 12 s, `04` 1 s, `05` 27 s at 2,000 draws. **`05` at 200,000 draws has not been run since the sodium cells
-arrived**; they add statistics for every anchor and year, so expect it to take
-longer than before, by an amount nobody has measured.
-
-**Its runtime at 200,000 draws has not been timed.** The last measured figure
-(5 min 15 s) was for the pre-merge `03` and does not carry over — `05` now does
-strictly more work. Do not quote a number until someone times it.
+`01` 1 s, `02` 4 s, `03` 12 s, `04` 1 s, `05` 27 s at 2,000 draws. **`05` at 200,000
+draws was run by him on 2026-10-02, with the sodium cells and the chemistry list: its
+outputs were written over 3 min 13 s, first to last file** (a lower bound read off file
+times, not a timer; he has not given me a timer figure). Memory was not measured.
 
 ### Testing without touching `data/`
 
@@ -215,6 +246,9 @@ The run of commits that built the current state, newest first:
 
 | commit | what |
 |---|---|
+| `84ab322` | handover and README: the chemistry list, and what it changed |
+| `52cdbc7` | one list of the chemistries we calculate; LMO and NCA are out |
+| `64ac93a` | 04: sodium is two chemistries, split by segment group |
 | `4991f5c` | handover and README: Na_ion is gone, 01 is names only and runs first |
 | `35e0abd` | remove Na_ion, draw the sodium cells in 02, rebuild 01 as a names-only structure figure |
 | `d0a0432` | the product structure shows the two sodium cells and the unitemised component |
@@ -553,7 +587,7 @@ deleted on 2026-09-14. Recorded because the reasoning still matters:**
 | `technology.cell_density_override_wh_per_kg` | where the workbook's density is not believed — LMFP only |
 | `data/raw/` | the two inputs — **not in git**, supplied via iCloud |
 | `data/composition/` | `element_draws/` — generated by `05` |
-| `data/consolidated/` | **the deliverable** — eight files in the workbook schema (two of them sodium cells built from literature, one solid-state with no composition) plus their draw arrays. **Your real folder also still holds 61 stale files each for `Na_ion`, LMO and NCA**, and `data/composition/element_draws/` 80 for LMO and NCA; `05` no longer writes them and does not clean up (§7, open) |
+| `data/consolidated/` | **the deliverable** — eight files in the workbook schema (two of them sodium cells built from literature, one solid-state with no composition) plus their draw arrays. His real folders are from the 2026-09-17 run, so they have no sodium cells yet; the stale LMO, NCA and old `Na_ion` files were deleted by him on 2026-10-02. **`05` never cleans its output folder**, so a chemistry dropped from `scope.chemistries` later leaves its files behind |
 | `figures/` | 27 figures after `01`-`05` have run (1, 4, 2, 1 and 19) — generated |
 
 **No data file is ever committed.** `data/` and `figures/` are excluded at the
@@ -585,9 +619,9 @@ copies one.
   `consolidated_<name>.csv` plus 30 draw arrays and 30 name files, like every
   other chemistry. **`Na_ion` is gone**: removed on his instruction ("Na_ion is
   gone, we have now two chemistries") from the settings, `05`, the figures and the
-  templates, having been kept unasked as a safeguard. What still carries the name
-  is **61 stale files in `data/consolidated/`** from before the removal (under
-  Open, below).
+  templates, having been kept unasked as a safeguard. Nothing in the settings or the
+  code carries the name now except comments saying it is gone; the 61 stale `Na_ion`
+  files in his `data/consolidated/` were deleted by him on 2026-10-02.
 - **Packaging is claimed from LFP** (its casing, separator, collectors and pack
   hardware; Al replaces Cu on the anode collector at x0.4764 for equal
   conductance) -- which is what the old `Na_ion` claimed, and all it did.
@@ -730,8 +764,8 @@ list filters what is enumerated, not what is drawn.
 cathode energy per gram of the lithium chemistries as the reference the sodium
 cathode's plausibility check is held against. It is a physical reference, not a list of
 what we calculate; narrowing it to the list would tighten that check. `99` also
-describes the whole of the data. **Stale in your real folders, not touched: the LMO,
-NCA and `Na_ion` files above.**
+describes the whole of the data. **The stale LMO, NCA and `Na_ion` files in his real
+folders (263) were deleted by him on 2026-10-02.**
 
 ### Verified, and not
 
@@ -741,7 +775,7 @@ the committed state, exported from the index and run alone, exits 0; **13 of 13*
 deliberately broken inputs are refused (the invariants, the sampler, the
 validator, and the drift check on both a cell and a packaging component). Those
 proofs were run outside the repository -- there is no test suite here to hold
-them. **Not verified: any run at 200,000 draws, and its time or memory.**
+them. **Not verified: the values of his 200,000-draw run (only its counts and draws were looked at, read-only), and its memory.**
 
 After `Na_ion` was removed, the structure figure rebuilt and the chemistry list added,
 same sandbox: `05` exits 0; against a run made before any of the figure work, **every
@@ -764,13 +798,14 @@ differs from before the sodium work, deliberately (open item 1).
 
 ### Open, in the order I would take them
 
+He takes these next week, from 2026-10-05.
+
 1. **04_04 (his).** The new file names; removing the name from
    `battery_chemistry_active_material_unknown` in RAWCLICStockAndFlow's
    `params_schema.py`; and reading the sodium share as two chemistries (below).
-   **`Na_ion` has no composition file any more, so anything reading
-   `consolidated_Na_ion.csv` finds only the 61 stale files until they are deleted or
-   the reader is changed; `05` never cleans its output folder, and deleting them has
-   not been asked.** In this repository the 04 scenarios now give sodium as the two
+   **`Na_ion` has no composition file any more (the stale ones were deleted on
+   2026-10-02), so anything still reading `consolidated_Na_ion.csv` finds nothing and
+   must read the two cells' files; `05` never cleans its output folder.** In this repository the 04 scenarios now give sodium as the two
    chemistries, split by segment group from his words: A, B, JA, JB Prussian white,
    with layered oxide increasing until 2070, when it reaches 20% of the sodium; C, D,
    JC, JD half and half in every year; E, F, JE, JF layered oxide only. The total
@@ -793,7 +828,7 @@ differs from before the sodium work, deliberately (open item 1).
    not list `literature_scenario` or `unitemised_cell_mass`.
 4. **Replace the four assumed inputs with sources**: N/P, the anode potential, the
    electrolyte maximum, and the density maximum of 220.
-5. **Run `05` at 200,000 draws and time it.**
+5. **Done by him on 2026-10-02:** `05` at 200,000 draws (3 min 13 s of output writing, read off file times). What is left is a look at the values, not a run.
 6. **The mutation tests are not in the repository.** Add them as a test file if
    wanted.
 7. **The composition-over-time stack colours nickel a pale grey, nearly invisible
