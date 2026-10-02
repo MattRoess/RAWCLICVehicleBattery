@@ -669,27 +669,42 @@ class ScenarioParams:
     # it to a few per cent keeps the material story -- sodium's aluminium anode
     # collector removing better than half the pack's copper -- without resting
     # on a clause likely to be wrong.
+    #
+    # SODIUM IS TWO CHEMISTRIES here, as everywhere else: Na_ion_prussian_white and
+    # Na_ion_layered. The sodium share is split by segment group, from his words of
+    # 2026-10-02: small cars (A, B, JA, JB) use Prussian white, and layered oxide
+    # increases until 2070, when it reaches 20% of the sodium (taken as a straight
+    # line from none in 2025); medium cars (C, D, JC, JD) are half and half in every
+    # year; large cars (E, F, JE, JF) are layered oxide only. The two shares add up
+    # to the single sodium share these scenarios had before.
     # SAFE TO CHANGE: yes.
     scenario_2: dict[str, dict[str, tuple[float, ...]]] = field(default_factory=lambda: {
-        "small":  {"Na_ion": (2, 40, 60, 68), "LFP": (68, 40, 25, 20),
+        "small":  {"Na_ion_prussian_white": (2, 38.22, 53.33, 54.4),
+                   "Na_ion_layered": (0, 1.78, 6.67, 13.6), "LFP": (68, 40, 25, 20),
                    "LMFP": (18, 15, 12, 10), "NMC_high": (12, 5, 3, 2)},
-        "medium": {"Na_ion": (0, 12, 20, 24), "LFP": (50, 48, 42, 38),
+        "medium": {"Na_ion_prussian_white": (0, 6, 10, 12),
+                   "Na_ion_layered": (0, 6, 10, 12), "LFP": (50, 48, 42, 38),
                    "LMFP": (22, 32, 34, 35), "NMC_high": (28, 8, 4, 3)},
-        "large":  {"Na_ion": (0, 3, 8, 10), "LFP": (8, 18, 24, 25),
+        "large":  {"Na_ion_layered": (0, 3, 8, 10), "LFP": (8, 18, 24, 25),
                    "LMFP": (17, 49, 58, 57), "NMC_high": (75, 30, 10, 8)},
     })
 
     # SCENARIO 3 -- scenario 2, with bipolar solid-state arriving LATER than
     # first proposed. 2035 for mass-market bipolar solid-state is the optimistic
     # end of every roadmap worth trusting, so it enters from 2040 and takes the
-    # large segments first, where the energy density is worth the cost.
+    # large segments first, where the energy density is worth the cost. Sodium is
+    # split between its two chemistries exactly as in scenario 2.
     # SAFE TO CHANGE: yes.
     scenario_3: dict[str, dict[str, tuple[float, ...]]] = field(default_factory=lambda: {
-        "small":  {"solid_state": (0, 0, 15, 35), "Na_ion": (2, 40, 52, 45),
+        "small":  {"solid_state": (0, 0, 15, 35),
+                   "Na_ion_prussian_white": (2, 38.22, 46.22, 36),
+                   "Na_ion_layered": (0, 1.78, 5.78, 9),
                    "LFP": (68, 40, 20, 12), "LMFP": (18, 15, 11, 7), "NMC_high": (12, 5, 2, 1)},
-        "medium": {"solid_state": (0, 0, 28, 50), "Na_ion": (0, 12, 15, 14),
+        "medium": {"solid_state": (0, 0, 28, 50),
+                   "Na_ion_prussian_white": (0, 6, 7.5, 7),
+                   "Na_ion_layered": (0, 6, 7.5, 7),
                    "LFP": (50, 48, 30, 18), "LMFP": (22, 32, 25, 17), "NMC_high": (28, 8, 2, 1)},
-        "large":  {"solid_state": (0, 2, 45, 70), "Na_ion": (0, 3, 5, 5),
+        "large":  {"solid_state": (0, 2, 45, 70), "Na_ion_layered": (0, 3, 5, 5),
                    "LFP": (8, 18, 12, 6), "LMFP": (17, 49, 33, 17), "NMC_high": (75, 28, 5, 2)},
     })
 
@@ -735,7 +750,8 @@ class ScenarioParams:
     scenario_colours: dict[str, str] = field(default_factory=lambda: {
         "LFP": "#2f8f5b", "LMFP": "#7fbf7b", "NMC_high": "#1f5f8b",
         "NMC_middle": "#e08214", "NCA": "#b07aa1",
-        "Na_ion": "#d9a441", "solid_state": "#6a51a3",
+        "Na_ion_layered": "#e0b030", "Na_ion_prussian_white": "#a0782a",
+        "solid_state": "#6a51a3",
     })
 
     # SAFE TO CHANGE: yes. Keep the .png suffix.

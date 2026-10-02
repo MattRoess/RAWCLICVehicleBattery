@@ -20,9 +20,8 @@ share of the market whose material content can actually be computed -- it falls
 a long way in scenario 3 by 2070, and that is the single most important thing
 this figure has to say.
 
-Sodium-ion counts as having a composition (two, built from literature), but the
-scenarios give it ONE share, `Na_ion`, which is not split between the two cells
-here -- so a material mass for it needs that split first.
+Sodium-ion is two chemistries here as everywhere else, Na_ion_prussian_white and
+Na_ion_layered, each with a composition built from literature.
 """
 
 from __future__ import annotations
@@ -116,10 +115,10 @@ def draw(scenarios: ChemistryScenarios):
         "everything right of the dashed line is ASSUMPTION, not data: the observed record ends in 2026",
         fontsize=12, ha="left", x=0.006, y=0.995)
     fig.text(0.006, 0.005,
-             "Sodium-ion has a composition for two cathodes (layered oxide, Prussian white), built from "
-             "literature; this figure does not split the sodium share between them. Bipolar solid-state has NO "
-             "composition and is not a variant of anything that does — it deletes the separator, the electrolyte "
-             "and the per-cell terminals. Above the black line, no material mass can be computed.\n"
+             "Sodium-ion is two chemistries, Prussian white and layered oxide, each with a composition built "
+             "from literature. Bipolar solid-state has NO composition and is not a variant of anything that "
+             "does — it deletes the separator, the electrolyte and the per-cell terminals. Above the black "
+             "line, no material mass can be computed.\n"
              "These are shares of what is SOLD. What returns for recycling depends on vehicle counts and "
              "lifetimes, which live in RAWCLICStockAndFlow — this project cannot answer it.",
              fontsize=7.5, color="#8a3b3b")
@@ -153,10 +152,7 @@ def main(argv: list[str] | None = None) -> int:
                             values="share_with_composition") * 100).round(0).astype(int).to_string())
         print("\n  Below 100 means material mass cannot be computed for that part of the "
               "market.\n  Missing compositions: "
-              f"{', '.join(params.scenarios.chemistries_without_composition)}"
-              "\n  Sodium-ion counts as covered: it has a composition for each of "
-              f"{', '.join(params.export.literature_chemistry_template)}, but its share "
-              "is not split between them here.")
+              f"{', '.join(params.scenarios.chemistries_without_composition)}")
 
         figures = {params.scenarios.scenario_file_name: draw(scenarios)}
     except ScenarioError as error:

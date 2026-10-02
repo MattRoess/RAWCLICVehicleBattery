@@ -208,6 +208,8 @@ The run of commits that built the current state, newest first:
 
 | commit | what |
 |---|---|
+| `4991f5c` | handover and README: Na_ion is gone, 01 is names only and runs first |
+| `35e0abd` | remove Na_ion, draw the sodium cells in 02, rebuild 01 as a names-only structure figure |
 | `d0a0432` | the product structure shows the two sodium cells and the unitemised component |
 | `f928a1d` | drop the LMFP lithium override: the workbook is fixed at source |
 | `8b34020` | **two sodium-ion cells built from literature**, every input drawn; the hash seed fixed |
@@ -225,11 +227,6 @@ The run of commits that built the current state, newest first:
 | `38a0575` | the consolidated files get the pack rules; 200 kWh for LMFP only |
 | `534e5a0` | composition at held capacity; improvement drawn, not asserted; structure follows weight; 400/800 V |
 | `1f693c9` | sodium/solid-state claims, shared-parts distribution, component `mass_scale` fix |
-
-**Not in this table: the work after `bafe50f`** -- `Na_ion` removed, the two
-sodium cells drawn in `02`, `src/unknown_chemistries.py`, the rebuilt structure
-figure (`01` and `src/overview_figure.py`), the corrected wording in `04`. It was
-uncommitted when this was written; `git status` says whether it still is.
 
 ### What `05` stopped doing, and why
 
@@ -580,9 +577,8 @@ copies one.
   `consolidated_<name>.csv` plus 30 draw arrays and 30 name files, like every
   other chemistry. **`Na_ion` is gone**: removed on his instruction ("Na_ion is
   gone, we have now two chemistries") from the settings, `05`, the figures and the
-  templates, having been kept unasked as a safeguard. Two things still carry the
-  name: the scenario share series in `scenarios.scenario_2` and `scenario_3`, and
-  **61 stale files in `data/consolidated/`** from before the removal (both under
+  templates, having been kept unasked as a safeguard. What still carries the name
+  is **61 stale files in `data/consolidated/`** from before the removal (under
   Open, below).
 - **Packaging is claimed from LFP** (its casing, separator, collectors and pack
   hardware; Al replaces Cu on the anode collector at x0.4764 for equal
@@ -623,6 +619,7 @@ copies one.
 | Negative-remainder draws conditioned out, not clipped | "1. to 3. seems to be OK" |
 | LMFP lithium override dropped; pushed | "Yes, commit the LMFP change and push". The repository is **public**. |
 | **`Na_ion` removed** | "Na_ion is gone we have now to chemistries!!" |
+| **Sodium in the 04 scenarios is two chemistries, split by segment group** | "In 4 the sodium contribution is split into the two chemistries. AB uses prussin white and might go to 20% layor. CD is 50/50 and EF is only layor". Corrected: "NO increase until 2070 up to 20%" -- layered oxide in small cars rises until 2070, when it reaches 20% |
 | **The structure figure shows every chemistry that has a composition, part by part, in plain words -- structure only** | "I want in this figure the chemistries, which we have the composition so one fully understands each of them ... Have the different components of the respective chemistiores." Of the legend: "Who the hell knows what the workbook is now?" Of its scope: "01 is draw battery structure and nothing else", then "yes, structure only". |
 
 ### What to know before reading a number
@@ -721,19 +718,19 @@ item 1).
 
 ### Open, in the order I would take them
 
-1. **04_04 (his), and the scenario shares here.** The new file names; splitting the
-   `Na_ion` share between the two cells (the mapping above); removing the name from
+1. **04_04 (his).** The new file names; removing the name from
    `battery_chemistry_active_material_unknown` in RAWCLICStockAndFlow's
-   `params_schema.py`. **`Na_ion` has no composition file any more, so anything
-   reading `consolidated_Na_ion.csv` finds only the 61 stale files until they are
-   deleted or the reader is changed; `05` never cleans its output folder, and
-   deleting them has not been asked.** In this repository the scenarios still have
-   ONE sodium series named `Na_ion` (`scenario_2`, `scenario_3`, and a colour in
-   `scenario_colours`). `04` now counts it as having a composition and says in its
-   footnote that the share is not split between the cells; that is why its figure
-   changed. **The split is his to give** -- by segment group, from his words about
-   Prussian white (stationary, AB) and layered oxide (CD, AB, perhaps EF) -- and
-   has not been invented.
+   `params_schema.py`; and reading the sodium share as two chemistries (below).
+   **`Na_ion` has no composition file any more, so anything reading
+   `consolidated_Na_ion.csv` finds only the 61 stale files until they are deleted or
+   the reader is changed; `05` never cleans its output folder, and deleting them has
+   not been asked.** In this repository the 04 scenarios now give sodium as the two
+   chemistries, split by segment group from his words: A, B, JA, JB Prussian white,
+   with layered oxide increasing until 2070, when it reaches 20% of the sodium; C, D,
+   JC, JD half and half in every year; E, F, JE, JF layered oxide only. The total
+   sodium share is unchanged (checked number by number against the old single
+   series). **Open: the rise in small cars is a straight line from none in 2025 to 20%
+   in 2070 (4.4% in 2035, 11.1% in 2050); that shape is my reading.**
 2. **Recovery.** The recovery battery case has coefficients for Ni, Mn, Cu, Fe, C,
    Al, P and O and **none for Na, F or N**; the report has none for sodium-ion
    recycling, so a source is needed. The layered oxide puts nickel, copper and
@@ -755,3 +752,14 @@ item 1).
    wanted.
 7. **The composition-over-time stack colours nickel a pale grey, nearly invisible
    against the band.** Not changed.
+8. **Figure 01 still shows LMO and NCA.** He said "NO LMO, NO NCA" (not used in EV),
+   answered "only LMO and NCA out" and "one list for all", then "DO not do anything
+   with the chemistries, just add the two Na chemistries". Nothing about LMO and NCA
+   was changed, and there is still no single list of the chemistries we calculate
+   (the places that name them are in `src/params_schema.py`: `drawing.overview_groups`,
+   `ev_details.chemistry_groups`, the three scenarios, and the per-chemistry
+   colours, energy densities and cell-to-pack ratios). Which chemistries 01 shows,
+   and whether 05 follows, is to be settled.
+9. **The 02 figures.** "02 figures are shit", with no reason given. The sodium ones
+   carry a comparison overlay that was my reading of "use the different reports and
+   data for 02", unconfirmed.

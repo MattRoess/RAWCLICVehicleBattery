@@ -21,10 +21,9 @@ liquid electrolyte and the per-cell terminals outright. `composition_coverage`
 reports how much of each scenario-year can be costed in materials at all, so the
 gap is visible instead of being filled with a lookalike chemistry.
 
-Sodium-ion is no longer in that position: it has a composition for each of the
-two cells built from literature (`export.literature_chemistry_template`). The
-scenarios still give it ONE share, `Na_ion`, which is not split between the two
-cells, so a material mass for it needs that split first.
+Sodium-ion is no longer in that position: it is two chemistries, each with a
+composition built from literature (`export.literature_chemistry_template`), and
+the scenarios give each its own share.
 
 THE OUTFLOW LAG, WHICH IS EASY TO FORGET
 -----------------------------------------
