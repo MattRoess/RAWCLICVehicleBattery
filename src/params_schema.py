@@ -113,109 +113,137 @@ class ScopeParams:
 
 @dataclass
 class DrawingParams:
-    """The product-structure drawing: what it is called and how it is laid out."""
+    """The structure figure: what is inside each chemistry's battery, part by part."""
 
-    # The figure written by 01_draw_battery_structure.py, in the project root.
-    # PNG only, by request. It is regenerable output and is not tracked in git.
+    # The figure written by 01_draw_battery_structure.py. PNG only, by request. It
+    # is regenerable output and is not tracked in git.
     # SAFE TO CHANGE: yes. Keep the .png suffix -- nothing else is written.
     output_file_name: str = "battery_product_structure.png"
 
-    # Resolution of that PNG. 200 gives a figure that stays readable when it is
-    # dropped into a slide at full width.
-    # SAFE TO CHANGE: yes. Below ~120 the 7pt labels start to break up.
+    # Resolution of that PNG, and of every other figure written to the figures
+    # folder. 200 stays readable when a figure is dropped into a slide at full
+    # width.
+    # SAFE TO CHANGE: yes. Below ~120 the small labels start to break up.
     output_dpi: int = 200
 
-    # Figure size in inches. The drawing is laid out on a fixed 100x100 grid, so
-    # these change how large everything is, never where anything sits.
-    # SAFE TO CHANGE: yes, keeping roughly this 3:2 shape.
-    figure_width_in: float = 15.5
+    # Width of the structure figure in inches. Its height follows from the number
+    # of rows, so a row added below is never squeezed.
+    # SAFE TO CHANGE: yes. Under ~18 the element names in the boxes start to collide.
+    figure_width_in: float = 22.0
 
-    # Figure height in inches. See figure_width_in.
-    # SAFE TO CHANGE: yes, keeping roughly the 3:2 shape.
-    figure_height_in: float = 10.5
+    # THE COLUMNS: one group per way the composition was arrived at, each with the
+    # chemistries in it, left to right. Each chemistry is its key in the composition,
+    # the short name written on top and, in grey under it, what its cathode is made of.
+    # A chemistry with a composition that is missing here is a chemistry the figure
+    # silently does not show, so the check at start-up refuses that.
+    # SAFE TO CHANGE: yes -- names and order are wording and layout. To add a
+    # chemistry add its row here as well as wherever it is calculated.
+    overview_groups: tuple[tuple[str, str, tuple[tuple[str, str, str], ...]], ...] = (
+        ("LITHIUM-ION", "from the project's composition data", (
+            ("battLiFP_subsub", "LFP", "iron phosphate"),
+            ("battLiMFP_subsub", "LMFP", "manganese iron phosphate"),
+            ("battLiMO_subsub", "LMO", "manganese oxide"),
+            ("battLiNCA_subsub", "NCA", "nickel cobalt aluminium oxide"),
+            ("battLiNMC_lowNi", "NMC, low nickel", "nickel manganese cobalt oxide"),
+            ("battLiNMC_midNi", "NMC, medium nickel", "nickel manganese cobalt oxide"),
+            ("battLiNMC_highNi", "NMC, high nickel", "nickel manganese cobalt oxide"),
+        )),
+        ("SODIUM-ION", "calculated from published cell figures", (
+            ("Na_ion_layered", "Layered oxide", "sodium nickel manganese copper iron oxide"),
+            ("Na_ion_prussian_white", "Prussian white", "sodium iron hexacyanoferrate"),
+        )),
+    )
 
-    # One component box, in grid units, and the gaps between boxes. The left
-    # branch puts two boxes side by side, so box_width must stay under half the
-    # branch width.
-    # SAFE TO CHANGE: yes, in small steps -- the text inside is fixed-size and
-    # will overflow a box made much smaller.
-    box_width: float = 23.5
-
-    # Height of one component box, in grid units. The four text lines inside are
-    # fixed-size, so much below 9 they start to collide.
-    # SAFE TO CHANGE: yes, in small steps.
-    box_height: float = 9.6
-
-    # Horizontal gap between the two columns of boxes on the cell branch.
-    # SAFE TO CHANGE: yes.
-    box_gap_x: float = 1.8
-
-    # Vertical gap between rows of boxes.
-    # SAFE TO CHANGE: yes.
-    box_gap_y: float = 2.8
-
-    # The order the cell-level components are drawn in: assembly order, not
-    # alphabetical -- what stores the charge, then what carries it out, then what
-    # contains it.
-    # SAFE TO CHANGE: yes. A component in the workbook but missing from this
-    # list is drawn last rather than dropped, so a new one cannot vanish.
+    # THE ROWS, part one: what is inside each cell, top to bottom -- what holds the
+    # charge, what lets the ions through, what carries the current out, what holds
+    # it all. `batteryCellUnitemised` is the rest of the cell and exists for
+    # sodium only; a lithium box shows a dash there.
+    # SAFE TO CHANGE: yes. A part that is in the results but in neither this list
+    # nor the next stops the figure and names it, rather than being left out of the
+    # rows while still counted in the totals.
     cell_component_order: tuple[str, ...] = (
         "cathodeActiveMaterial", "anodeActiveMaterial",
         "currentCollectorCathode", "currentCollectorAnode",
         "batteryCellElectrolyte", "batteryCellSeparator",
         "batteryCellCasing", "batteryPackCellTerminals",
+        "batteryCellUnitemised",
     )
 
-    # The same, for the pack-level components: heaviest structure first.
+    # THE ROWS, part two: the pack hardware around the cells, heaviest first.
     # SAFE TO CHANGE: yes, same rule as above.
     pack_component_order: tuple[str, ...] = (
         "batteryPackSupportFrame", "batteryPackThermalConductor",
         "batteryPackModuleEnclosuresAndCoolantManifolds", "batteryPackCables",
     )
 
-    # Plain English for each component code. The only content here that cannot
-    # be derived from the workbook: a bare code is not a label a reader can use.
-    # A component with no entry is drawn as a bare code and reported on the run.
-    # SAFE TO CHANGE: yes -- this is wording, it changes nothing computed.
+    # The name each row is given, in plain words.
+    # SAFE TO CHANGE: yes -- wording, it changes nothing computed. A part with no
+    # label stops the figure.
+    component_labels: dict[str, str] = field(default_factory=lambda: {
+        "cathodeActiveMaterial": "Cathode",
+        "anodeActiveMaterial": "Anode",
+        "currentCollectorCathode": "Cathode foil",
+        "currentCollectorAnode": "Anode foil",
+        "batteryCellElectrolyte": "Electrolyte",
+        "batteryCellSeparator": "Separator",
+        "batteryCellCasing": "Cell casing",
+        "batteryPackCellTerminals": "Cell terminals",
+        "batteryCellUnitemised": "Rest of the cell",
+        "batteryPackSupportFrame": "Pack frame",
+        "batteryPackThermalConductor": "Cooling plate",
+        "batteryPackModuleEnclosuresAndCoolantManifolds": "Module housings, coolant pipes",
+        "batteryPackCables": "Cables",
+    })
+
+    # One plain line under each row name saying what the part is. Kept true for
+    # every chemistry: which metal a foil is made of is in the boxes, not here.
+    # SAFE TO CHANGE: yes -- wording. A part with no line stops the figure.
     component_gloss: dict[str, str] = field(default_factory=lambda: {
-        "cathodeActiveMaterial": "the cathode itself -- where Ni, Co, Mn, Fe sit",
-        "anodeActiveMaterial": "the anode itself -- graphite, silicon-doped in NMC",
-        "currentCollectorCathode": "aluminium foil carrying current off the cathode",
-        "currentCollectorAnode": "copper foil carrying current off the anode",
-        "batteryCellElectrolyte": "the lithium salt solution between the electrodes",
-        "batteryCellSeparator": "porous film keeping the electrodes apart",
-        "batteryCellCasing": "the can or pouch enclosing one cell",
-        "batteryPackCellTerminals": "the cell's own Al/Cu terminals",
-        "batteryPackSupportFrame": "the steel frame the modules are mounted in",
-        "batteryPackThermalConductor": "aluminium cooling plate",
-        "batteryPackModuleEnclosuresAndCoolantManifolds": "module housings and coolant piping",
-        "batteryPackCables": "copper wiring between modules",
+        "cathodeActiveMaterial": "the positive electrode material",
+        "anodeActiveMaterial": "the negative electrode material",
+        "currentCollectorCathode": "metal foil carrying the current out of the cathode",
+        "currentCollectorAnode": "metal foil carrying the current out of the anode",
+        "batteryCellElectrolyte": "liquid with dissolved salt between the electrodes",
+        "batteryCellSeparator": "thin porous film keeping the electrodes apart",
+        "batteryCellCasing": "the can or pouch around each cell",
+        "batteryPackCellTerminals": "the metal tabs on each cell",
+        "batteryCellUnitemised": "cell weight the parts above do not explain "
+                                 "(binder, carbon additive, anything else)",
+        "batteryPackSupportFrame": "the frame the modules are mounted in",
+        "batteryPackThermalConductor": "plate that carries heat away from the cells",
+        "batteryPackModuleEnclosuresAndCoolantManifolds":
+            "boxes around groups of cells, plus the coolant pipes",
+        "batteryPackCables": "wiring between the modules",
     })
 
-    # Which role each cell-level component plays, and the fill colour per role.
-    # Colour groups the twelve boxes so the eye does not have to read them all.
-    # Anything not listed here falls back to the 'cell_body' colour; everything
-    # on the pack branch uses 'pack' whatever its role says.
-    # SAFE TO CHANGE: yes -- presentation only.
-    component_role: dict[str, str] = field(default_factory=lambda: {
-        "cathodeActiveMaterial": "electrode",
-        "anodeActiveMaterial": "electrode",
-        "currentCollectorCathode": "collector",
-        "currentCollectorAnode": "collector",
-        "batteryCellElectrolyte": "cell_body",
-        "batteryCellSeparator": "cell_body",
-        "batteryCellCasing": "cell_body",
-        "batteryPackCellTerminals": "terminal",
-    })
+    # The figure's title.
+    # SAFE TO CHANGE: yes -- wording.
+    overview_title: str = "What is inside a battery pack, chemistry by chemistry"
 
-    # SAFE TO CHANGE: yes -- presentation only. Keep them pale: the labels are
-    # dark text sitting on top.
-    role_colours: dict[str, str] = field(default_factory=lambda: {
-        "electrode": "#dbe7f3",
-        "collector": "#e3eddc",
-        "cell_body": "#f6ecd9",
-        "terminal": "#efe1ee",
-        "pack": "#e6e4e0",
+    # The explanation under the title -- all of it, nothing is explained anywhere
+    # else. The two phrases the boxes use are named after it so the lines can quote them.
+    # SAFE TO CHANGE: yes -- wording. Keep each line short; they are drawn as-is.
+    overview_legend: tuple[str, ...] = (
+        "Each box lists the chemical elements the data names for that part.",
+        "A dash: this chemistry has no such part.     "
+        "Not broken down: it has the part, but the data does not split it into elements.",
+    )
+
+    # What a box says for a part the data does not split into elements. Quoted by
+    # the legend above, so change them together.
+    # SAFE TO CHANGE: yes -- wording.
+    overview_no_split: str = "not broken down"
+
+    # The line at the foot of the figure. {missing} is the chemistries that have no
+    # composition and so have no column.
+    # SAFE TO CHANGE: yes -- wording.
+    overview_footnote: str = "Not shown: {missing} (no composition exists for it yet)."
+
+    # The two headings over the rows. Both keys are needed.
+    # SAFE TO CHANGE: yes -- wording.
+    overview_headings: dict[str, str] = field(default_factory=lambda: {
+        "cells_band": "INSIDE THE CELLS",
+        "pack_band": "AROUND THE CELLS: THE PACK HARDWARE",
     })
 
 
@@ -367,6 +395,34 @@ class CapacityFigureParams:
     # SAFE TO CHANGE: yes.
     components_figure_size_in: tuple[float, float] = (16.0, 11.0)
     totals_figure_size_in: tuple[float, float] = (11.0, 7.5)
+
+    # THE SODIUM SHEET, drawn as diamonds on the sodium cells' component panels, for
+    # COMPARISON ONLY -- the way the workbook's five sizes are the dots on a lithium
+    # chemistry's. It is the one source with component masses at several capacities
+    # (10 to 200 kWh), written as ASSUMED mass fractions of a 160 Wh/kg cell; the
+    # model does not use it (see HANDOVER.md section 7) and the panels say so. Where
+    # the model and the sheet part company -- the casing, the separator -- that is
+    # the point of drawing it.
+    # SAFE TO CHANGE: yes. A blank file name, or a file that is not there, draws
+    # the panels without the diamonds.
+    sodium_sheet_file: str = "documentation/Sodium_Ion_Battery_Cell_Composition.xlsx"
+
+    # Which rows of the sodium sheet make up each model component. The sheet itemises
+    # binders and conductive additive, which the model carries inside
+    # `batteryCellUnitemised`, so those four rows are summed there.
+    # SAFE TO CHANGE: yes -- the names must match the sheet's own.
+    sodium_sheet_components: dict[str, tuple[str, ...]] = field(default_factory=lambda: {
+        "cathodeActiveMaterial": ("Cathode active material",),
+        "anodeActiveMaterial": ("Anode active material",),
+        "currentCollectorCathode": ("Cathode current collector",),
+        "currentCollectorAnode": ("Anode current collector",),
+        "batteryCellElectrolyte": ("Electrolyte salt", "Electrolyte solvent"),
+        "batteryCellSeparator": ("Separator",),
+        "batteryCellCasing": ("Cell casing / packaging",),
+        "batteryCellUnitemised": ("Cathode binder", "Anode binder",
+                                  "Conductive additive (cathode)",
+                                  "Conductive additive (anode)"),
+    })
 
 
 @dataclass
@@ -582,15 +638,17 @@ class ScenarioParams:
     anchor_years: tuple[int, ...] = (2025, 2035, 2050, 2070)
 
     # ⚠️ CHEMISTRIES WITH NO COMPOSITION DATA. The workbook has LFP, LMFP, LMO,
-    # NCA and three NMC grades -- and nothing for sodium-ion or solid-state.
-    # They are NOT variants of what is there: sodium replaces the copper anode
-    # collector with aluminium, and bipolar solid-state deletes the separator,
-    # the liquid electrolyte and the per-cell terminals outright. So a scenario
-    # can state their SHARE, but no material mass can be computed for them until
-    # a composition is supplied. Every output marks the gap rather than
-    # substituting a lookalike.
+    # NCA and three NMC grades -- and nothing for solid-state. Bipolar solid-state
+    # is NOT a variant of what is there: it deletes the separator, the liquid
+    # electrolyte and the per-cell terminals outright. So a scenario can state
+    # its SHARE, but no material mass can be computed for it until a composition
+    # is supplied. Every output marks the gap rather than substituting a lookalike.
+    #
+    # Sodium-ion was listed here until 2026-10-02. It is now two cells built from
+    # literature (`export.literature_chemistry_template`), each with a composition
+    # of its own, and the name `Na_ion` no longer exists as a chemistry.
     # SAFE TO CHANGE: remove a name once its composition exists.
-    chemistries_without_composition: tuple[str, ...] = ("Na_ion", "solid_state")
+    chemistries_without_composition: tuple[str, ...] = ("solid_state",)
 
     # SCENARIO 1 -- "LFP volume, NMC premium", kept as a specific case.
     # Today's structure extrapolated: LFP and LMFP take the volume segments, NMC
@@ -666,11 +724,10 @@ class ScenarioParams:
         "battLiNMC_highNi": "#1f5f8b",    # blue
         "battLiNMC_midNi": "#e08214",     # orange
         "battLiNMC_lowNi": "#8c3d04",     # darker brown-orange
-        "Na_ion": "#d9a441",              # sand
         "solid_state": "#6a51a3",         # violet
-        # The two sodium cells built from literature, two more shades of the
-        # sodium sand. Listed here, as Na_ion is, because the distribution
-        # figures look their colour up in this dict.
+        # The two sodium cells built from literature, two shades of sand. Listed
+        # here, as solid_state is, because the distribution figures look their
+        # colour up in this dict.
         "Na_ion_layered": "#e0b030",          # gold
         "Na_ion_prussian_white": "#a0782a",   # bronze
     })
@@ -690,11 +747,13 @@ class ScenarioParams:
 def _sodium_packaging_template(note: str) -> dict:
     """
     What a sodium-ion cell's PACKAGING is taken to be, for the two cells built
-    from literature. It is the claim `unknown_chemistry_template["Na_ion"]`
-    makes -- LFP's casing, separator, terminals, collectors and pack hardware,
-    aluminium replacing copper on the anode collector at 0.4764 for equal
-    conductance -- written once so the two cannot drift apart. `Na_ion` itself
-    is left exactly as it was.
+    from literature: LFP's casing, separator, terminals, collectors and pack
+    hardware, with aluminium replacing copper on the anode collector.
+    Sodium does not alloy with aluminium at low potential, so that one swap --
+    roughly 0.4 kg Cu/kWh, 55-59% of the pack's copper -- is the main reason to
+    model sodium at all. This was `unknown_chemistry_template["Na_ion"]` until that
+    entry was removed on 2026-10-02; it is written once here so the two cells
+    cannot drift apart.
     """
     pack_hardware = ("batteryPackCellTerminals", "batteryPackCables",
                      "batteryPackSupportFrame", "batteryPackThermalConductor",
@@ -702,14 +761,39 @@ def _sodium_packaging_template(note: str) -> dict:
     return {
         "based_on": "battLiFP_subsub",
         "remove_components": (),
+        # Scoped to the two components that carry the swap. A blanket Cu -> Al
+        # would also turn the pack cables aluminium, which is wrong: the cables
+        # stay copper whatever the cell chemistry is.
         "element_swaps": {"currentCollectorAnode": {"Cu": "Al"},
                           "batteryPackCellTerminals": {"Cu": "Al"}},
+        # The pack hardware is chemistry-independent, and the collectors are the
+        # whole point of the sodium case. A sodium cell sits in the same can, in
+        # the same format, behind the same porous separator as a lithium one:
+        # nothing about sodium changes those. The cathode, anode and electrolyte
+        # are NOT claimed here -- they are built (technology.sodium_cathode).
         "assert_elements_for": ("currentCollectorAnode", "currentCollectorCathode",
                                 "batteryCellCasing", "batteryCellSeparator")
                                + pack_hardware,
         "claim_masses_for": ("batteryCellCasing", "batteryCellSeparator",
                              "currentCollectorAnode", "currentCollectorCathode")
                             + pack_hardware,
+        # Relabelling copper foil as aluminium without changing its mass would be
+        # wrong twice over. Aluminium is 2.70 g/cm3 against copper's 8.96, but it
+        # also conducts at only 37.7 MS/m against 59.6, so matching the resistance
+        # needs 1.58x the cross-section. Both together:
+        #     (59.6 / 37.7) x (2.70 / 8.96) = 0.4764
+        # LFP's 27.56 kg of copper becomes 13.13 kg of aluminium: a 14.43 kg
+        # saving, only 2.9% of a 495 kg pack. The mass is not the point. The
+        # copper is: that collector is 27.56 of the 45.07 kg of copper in the
+        # whole pack, 61%, so a sodium pack carries 17.50 kg -- cables and
+        # terminals only.
+        # ASSUMPTION, NOT MEASUREMENT: equal conductance. A real cell trades
+        # resistance against mass differently, and a move to 800V lowers the
+        # current, which relaxes this and pushes the mass back toward the 8.31 kg
+        # that pure density scaling would give.
+        # Keyed by component AND element, and applied while the row still says
+        # copper: the terminals are part aluminium already, and that aluminium
+        # must not be scaled by a copper-to-aluminium factor.
         "mass_scale": {"currentCollectorAnode": {"Cu": 0.4764},
                        "batteryPackCellTerminals": {"Cu": 0.4764}},
         "note": note,
@@ -865,8 +949,8 @@ class ExportParams:
         "batteryCellCasing": {"Al": 0.40, "plastics": 0.60},
     })
 
-    # WRITE A FILE FOR THE CHEMISTRIES WITH NO COMPOSITION TOO -- sodium-ion and
-    # bipolar solid-state -- with every mass left EMPTY and marked unknown,
+    # WRITE A FILE FOR THE CHEMISTRY WITH NO COMPOSITION TOO -- bipolar
+    # solid-state -- with every mass left EMPTY and marked unknown,
     # rather than leaving them out. A missing file is easy to overlook
     # downstream; a file full of blanks with a status column is not, and the
     # stock-and-flow model can carry the chemistry through and see the gap
@@ -894,11 +978,6 @@ class ExportParams:
     #                       nobody made, empty mass or not.
     #   note                what a reader has to know before using the row
     #
-    # Sodium-ion: aluminium replaces copper as the anode current collector,
-    # because sodium does not alloy with aluminium at low potential. That single
-    # swap is roughly 0.4 kg Cu/kWh, 55-59% of the pack's copper, and it is the
-    # main reason to model sodium at all.
-    #
     # Bipolar solid-state: the separator and the liquid electrolyte cease to
     # exist, and stacking cells in series inside the pack removes the per-cell
     # terminals. The anode is lithium or sodium metal rather than graphite --
@@ -907,69 +986,6 @@ class ExportParams:
     # SAFE TO CHANGE: yes, and it should be, as soon as real data exists -- at
     # which point these chemistries belong in the workbook instead.
     unknown_chemistry_template: dict[str, dict] = field(default_factory=lambda: {
-        "Na_ion": {
-            "based_on": "battLiFP_subsub",
-            "remove_components": (),
-            "element_swaps": {"currentCollectorAnode": {"Cu": "Al"},
-                              "batteryPackCellTerminals": {"Cu": "Al"}},
-            # The pack hardware is chemistry-independent, and the current
-            # collectors are the whole point of the sodium case. The cathode,
-            # anode and electrolyte are not claimed.
-            "assert_elements_for": ("currentCollectorAnode", "currentCollectorCathode",
-                                    "batteryCellCasing", "batteryCellSeparator",
-                                    "batteryPackCellTerminals",
-                                    "batteryPackCables", "batteryPackSupportFrame",
-                                    "batteryPackThermalConductor",
-                                    "batteryPackModuleEnclosuresAndCoolantManifolds"),
-            # The packaging is what can be claimed. Everything here keeps the base
-            # chemistry's mass; the cathode, anode and electrolyte stay empty. At
-            # 75 kWh that fills 46.7% of the pack and leaves 53.3% open.
-                        # EVERYTHING THAT IS NOT THE CHEMISTRY. The can, the separator, the
-            # terminals, the collectors and the four pack components. A sodium
-            # cell sits in the same steel or aluminium can as a lithium one, in
-            # the same format, behind the same porous separator -- nothing about
-            # sodium changes those. The workbook files casing and separator under
-            # the chemistry's own Layer 1 rather than under battPackXEV, which is
-            # bookkeeping, not a statement that they differ.
-            #
-            # Only the cathode, the anode and the electrolyte are left unclaimed,
-            # because only those actually depend on the chemistry.
-            #
-            # NOTE casing and separator have no element rows anywhere in the
-            # workbook, so they add mass at component and material level and
-            # nothing at element level -- the same 8% gap every chemistry has.
-            "claim_masses_for": ("batteryCellCasing", "batteryCellSeparator",
-                                 "batteryPackCellTerminals",
-                                 "currentCollectorAnode", "currentCollectorCathode",
-                                 "batteryPackCables", "batteryPackSupportFrame",
-                                 "batteryPackThermalConductor",
-                                 "batteryPackModuleEnclosuresAndCoolantManifolds"),
-            # Relabelling copper foil as aluminium without changing its mass would
-            # be wrong twice over. Aluminium is 2.70 g/cm3 against copper's 8.96,
-            # but it also conducts at only 37.7 MS/m against 59.6, so matching the
-            # resistance needs 1.58x the cross-section. Both together:
-            #     (59.6 / 37.7) x (2.70 / 8.96) = 0.4764
-            # LFP's 27.56 kg of copper becomes 13.13 kg of aluminium -- a 14.43 kg
-            # saving, only 2.9% of a 495 kg pack. The mass is not the point. The
-            # copper is: that collector is 27.56 of the 45.07 kg of copper in the
-            # whole pack, 61%, so a sodium pack carries 17.50 kg -- cables and
-            # terminals only.
-            # ASSUMPTION, NOT MEASUREMENT: equal conductance. A real cell trades
-            # resistance against mass differently, and a move to 800V lowers the
-            # current, which relaxes this and pushes the mass back toward the
-            # 8.31 kg that pure density scaling would give.
-            #
-            # Keyed by component AND element, and applied while the row still says
-            # copper: the terminals are part aluminium already, and that aluminium
-            # must not be scaled by a copper-to-aluminium factor.
-            "mass_scale": {"currentCollectorAnode": {"Cu": 0.4764},
-                           "batteryPackCellTerminals": {"Cu": 0.4764}},
-            "note": ("packaging assumed from LFP -- casing, separator, terminals, "
-                     "collectors and pack hardware carry LFP's masses; Al replaces Cu "
-                     "as the anode current collector, its mass scaled by 0.4764 for "
-                     "equal conductance (density AND conductivity, an assumption); "
-                     "cathode, anode and electrolyte are NOT known"),
-        },
         "solid_state": {
             "based_on": "battLiNMC_highNi",
             # BIPOLAR MEANS ONE PACKAGE FOR THE WHOLE BATTERY, NOT ONE PER CELL.
@@ -1055,10 +1071,10 @@ class ExportParams:
     # `batteryCellUnitemised`.
     #
     # The two names are file names: 04_04 in RAWCLICStockAndFlow reads
-    # `<name>_<kWh>kWh_<V>V_*.npy`. `Na_ion` is still written, unchanged, until
-    # 04_04 is switched over.
-    # SAFE TO CHANGE: the note freely; the claims only with the same reasoning
-    # as `unknown_chemistry_template["Na_ion"]`.
+    # `<name>_<kWh>kWh_<V>V_*.npy`. They REPLACE `Na_ion`, which no longer exists
+    # as a chemistry (2026-10-02), so 04_04 has to read these names.
+    # SAFE TO CHANGE: the note freely; the claims only with the reasoning written
+    # in `_sodium_packaging_template`.
     literature_chemistry_template: dict[str, dict] = field(default_factory=lambda: {
         "Na_ion_layered": _sodium_packaging_template(
             "layered-oxide sodium-ion, built from literature, a SCENARIO and not a bill "
@@ -1328,20 +1344,8 @@ class TechnologyParams:
         "battLiNMC_highNi":  {"basis": "cell", "years": (2020, 2070),
                               "wh_per_kg": (339.0, 423.8)},
 
-        # Sodium improves too, and treating it as static was wrong: without a
-        # trajectory it had no pack mass, so its unknown active material could
-        # carry no number at all while solid-state's could.
-        # Supplied 2026-09-10, at CELL level.
-        # Held flat after 2050 -- np.interp does not extrapolate, so 2060 and
-        # 2070 stay at 220. That is an assumption of stagnation, not a forecast;
-        # add later years here if that is wrong.
-        "Na_ion": {
-            "basis": "cell",
-            "years": (2020, 2070),
-            "wh_per_kg": (200.0, 250.0),
-        },
-        # The two sodium cells built from literature take Na_ion's trajectory:
-        # 200 Wh/kg, which has been seen in reports and presentations, rising 25%.
+        # The two sodium cells built from literature: 200 Wh/kg, which has been
+        # seen in reports and presentations, rising 25% by 2070, at CELL level.
         # It sets the structure scaling only; the cell mass of these two is drawn
         # (technology.sodium_cell).
         "Na_ion_layered": {
@@ -1381,7 +1385,6 @@ class TechnologyParams:
     # SAFE TO CHANGE: yes. Set a chemistry to None to leave its packaging exact.
     unknown_chemistry_mass_scale: dict[str, dict[str, float]] = field(
         default_factory=lambda: {
-            "Na_ion": {"min": 0.9, "mode": 1.0, "max": 1.3},
             "solid_state": {"min": 0.7, "mode": 0.8, "max": 1.1},
             "Na_ion_layered": {"min": 0.9, "mode": 1.0, "max": 1.3},
             "Na_ion_prussian_white": {"min": 0.9, "mode": 1.0, "max": 1.3},
@@ -1436,7 +1439,6 @@ class TechnologyParams:
         # hardware does not scale with the cells. 0.650 is the middle of the
         # range this project exports.
         # SAFE TO CHANGE: yes, and worth about 25% of pack mass at the extremes.
-        "Na_ion": 0.650,
         "Na_ion_layered": 0.650,
         "Na_ion_prussian_white": 0.650,
     })
@@ -1637,39 +1639,38 @@ class Params:
                 f"format written: {drawing.output_file_name!r}")
         if drawing.output_dpi <= 0:
             raise ParameterError(f"drawing.output_dpi must be positive: {drawing.output_dpi}")
-        for name in ("figure_width_in", "figure_height_in", "box_width",
-                     "box_height", "box_gap_x", "box_gap_y"):
-            if getattr(drawing, name) <= 0:
-                raise ParameterError(f"drawing.{name} must be positive: {getattr(drawing, name)}")
+        if drawing.figure_width_in <= 0:
+            raise ParameterError(
+                f"drawing.figure_width_in must be positive: {drawing.figure_width_in}")
 
         overlap = set(drawing.cell_component_order) & set(drawing.pack_component_order)
         if overlap:
             raise ParameterError(
-                f"a component is ordered on both branches: {sorted(overlap)}. Which "
-                "branch it belongs to is decided by the workbook's Layer 1, so an "
-                "ordering entry on the wrong branch simply never applies.")
-
-        ordered = set(drawing.cell_component_order) | set(drawing.pack_component_order)
-        without_gloss = sorted(ordered - set(drawing.component_gloss))
-        if without_gloss:
+                f"a component is in both drawing.cell_component_order and "
+                f"drawing.pack_component_order: {sorted(overlap)}. It would be drawn "
+                "as two rows and counted twice.")
+        ordered = list(drawing.cell_component_order) + list(drawing.pack_component_order)
+        if len(set(ordered)) != len(ordered):
             raise ParameterError(
-                f"no drawing.component_gloss for {without_gloss}. These are known "
-                "components, so a missing gloss is an oversight rather than a new "
-                "component appearing in the workbook.")
-
-        unknown_role = sorted(set(drawing.component_role.values()) - set(drawing.role_colours))
-        if unknown_role:
+                "drawing.cell_component_order or drawing.pack_component_order lists "
+                "a component twice.")
+        for name in ("component_labels", "component_gloss"):
+            without = sorted(set(ordered) - set(getattr(drawing, name)))
+            if without:
+                raise ParameterError(
+                    f"no drawing.{name} for {without}. These are rows of the figure, "
+                    "so a missing entry is an oversight.")
+        for name in ("overview_title", "overview_no_split", "overview_footnote"):
+            if not getattr(drawing, name).strip():
+                raise ParameterError(f"drawing.{name} is empty.")
+        missing_headings = sorted({"cells_band", "pack_band"} - set(drawing.overview_headings))
+        if missing_headings:
             raise ParameterError(
-                f"drawing.component_role uses role(s) with no colour: {unknown_role}. "
-                f"Known roles: {sorted(drawing.role_colours)}")
-        if "pack" not in drawing.role_colours:
+                f"drawing.overview_headings has no entry for {missing_headings}.")
+        if not drawing.overview_legend or not all(drawing.overview_legend):
             raise ParameterError(
-                "drawing.role_colours must define 'pack' -- it is the fill for the "
-                "whole pack branch.")
-        if "cell_body" not in drawing.role_colours:
-            raise ParameterError(
-                "drawing.role_colours must define 'cell_body' -- it is the fallback "
-                "for a cell component with no role.")
+                "drawing.overview_legend is empty. The figure explains itself in these "
+                "lines and nowhere else.")
 
         interp, mc, figure = self.interpolation, self.monte_carlo, self.capacity_figure
 
@@ -2099,6 +2100,23 @@ class Params:
             raise ParameterError(
                 f"no ev_details.reference_battery_size_map entry for {unmapped} -- "
                 "the comparison panel would have nothing to compare those against.")
+
+        dr = self.drawing
+        listed = [key for _name, _how, members in dr.overview_groups
+                  for key, _short, _material in members]
+        if len(set(listed)) != len(listed):
+            raise ParameterError(
+                "drawing.overview_groups lists a chemistry twice: "
+                f"{sorted({key for key in listed if listed.count(key) > 1})}")
+        has_composition = set(sc.workbook_chemistry_colours) - set(sc.chemistries_without_composition)
+        left_out = sorted(has_composition - set(listed))
+        not_one = sorted(set(listed) - has_composition)
+        if left_out or not_one:
+            raise ParameterError(
+                "drawing.overview_groups must list exactly the chemistries that have a "
+                f"composition. Left out: {left_out}. Listed but with no composition "
+                f"(or unknown): {not_one}. A chemistry left out here is one the figure "
+                "silently does not show.")
 
 
 def current() -> Params:

@@ -14,11 +14,15 @@ at all.
 ⚠️ EVERYTHING AFTER 2026 IS AN ASSUMPTION. The observed data ends there. The
 shares are a written-down judgement in `scenarios.*`, meant to be argued with.
 
-The stack is ordered so that every chemistry WITH a composition in the workbook
-sits at the bottom and those without sit on top. The line between them is
-therefore the share of the market whose material content can actually be
-computed -- it falls to a fifth in scenario 3 by 2070, and that is the single
-most important thing this figure has to say.
+The stack is ordered so that every chemistry WITH a composition sits at the
+bottom and those without sit on top. The line between them is therefore the
+share of the market whose material content can actually be computed -- it falls
+a long way in scenario 3 by 2070, and that is the single most important thing
+this figure has to say.
+
+Sodium-ion counts as having a composition (two, built from literature), but the
+scenarios give it ONE share, `Na_ion`, which is not split between the two cells
+here -- so a material mass for it needs that split first.
 """
 
 from __future__ import annotations
@@ -112,10 +116,10 @@ def draw(scenarios: ChemistryScenarios):
         "everything right of the dashed line is ASSUMPTION, not data: the observed record ends in 2026",
         fontsize=12, ha="left", x=0.006, y=0.995)
     fig.text(0.006, 0.005,
-             "Sodium-ion and bipolar solid-state have NO composition in the workbook and are not variants of "
-             "anything that does — sodium swaps the copper anode collector for aluminium, bipolar solid-state "
-             "deletes the separator, the electrolyte and the per-cell terminals. Above the black line, no "
-             "material mass can be computed.\n"
+             "Sodium-ion has a composition for two cathodes (layered oxide, Prussian white), built from "
+             "literature; this figure does not split the sodium share between them. Bipolar solid-state has NO "
+             "composition and is not a variant of anything that does — it deletes the separator, the electrolyte "
+             "and the per-cell terminals. Above the black line, no material mass can be computed.\n"
              "These are shares of what is SOLD. What returns for recycling depends on vehicle counts and "
              "lifetimes, which live in RAWCLICStockAndFlow — this project cannot answer it.",
              fontsize=7.5, color="#8a3b3b")
@@ -143,13 +147,16 @@ def main(argv: list[str] | None = None) -> int:
             print(table.round(0).fillna(0).astype(int).to_string())
 
         coverage = scenarios.composition_coverage()
-        print("\n=== SHARE OF THE MARKET WITH A COMPOSITION IN THE WORKBOOK [%]")
+        print("\n=== SHARE OF THE MARKET WITH A COMPOSITION [%]")
         print((coverage[coverage.year.isin(anchors)]
                .pivot_table(index=["scenario", "year"], columns="segment_group",
                             values="share_with_composition") * 100).round(0).astype(int).to_string())
         print("\n  Below 100 means material mass cannot be computed for that part of the "
               "market.\n  Missing compositions: "
-              f"{', '.join(params.scenarios.chemistries_without_composition)}")
+              f"{', '.join(params.scenarios.chemistries_without_composition)}"
+              "\n  Sodium-ion counts as covered: it has a composition for each of "
+              f"{', '.join(params.export.literature_chemistry_template)}, but its share "
+              "is not split between them here.")
 
         figures = {params.scenarios.scenario_file_name: draw(scenarios)}
     except ScenarioError as error:

@@ -39,6 +39,7 @@ import numpy as np  # noqa: E402
 
 from src.composition import CompositionError, CompositionModel  # noqa: E402
 from src.params_schema import ParameterError, current  # noqa: E402
+from src.unknown_chemistries import CompositionWithCells  # noqa: E402
 
 INK = "#1c1c1c"
 MUTED = "#5c5c5c"
@@ -46,6 +47,42 @@ CURVE = "#2f6f9f"
 BAND = "#8fbcd9"
 ANCHOR = "#1c1c1c"
 EXTRAP = "#f2e7e3"
+SHEET = "#1f5f8b"
+
+
+def read_sodium_sheet(params, project_root) -> dict[str, tuple[np.ndarray, np.ndarray]]:
+    """
+    The sodium spreadsheet's component masses as {model component: (capacities, kg)}.
+
+    Empty when the file is not there, so a clone without the spreadsheet (it is
+    ignored by git) still draws everything else.
+    """
+    import re
+
+    import openpyxl
+
+    figure = params.capacity_figure
+    path = Path(project_root) / figure.sodium_sheet_file
+    if not figure.sodium_sheet_file or not path.exists():
+        return {}
+    sheet = openpyxl.load_workbook(path, data_only=True)["Scaled Material Composition"]
+    header = {column: sheet.cell(3, column).value for column in range(1, sheet.max_column + 1)}
+    capacities = {column: float(re.search(r"Mass at ([\d.]+) kWh", str(text)).group(1))
+                  for column, text in header.items()
+                  if text and re.search(r"Mass at ([\d.]+) kWh", str(text))}
+    rows = {str(sheet.cell(row, 1).value): row for row in range(4, sheet.max_row + 1)}
+    out = {}
+    for component, names in figure.sodium_sheet_components.items():
+        missing = [name for name in names if name not in rows]
+        if missing:
+            print(f"NOTE: the sodium spreadsheet has no row {missing}; {component} is drawn "
+                  "without its diamonds.")
+            continue
+        x = np.array(sorted(capacities.values()))
+        y = np.array([sum(float(sheet.cell(rows[name], column).value) for name in names)
+                      for column in sorted(capacities, key=capacities.get)])
+        out[component] = (x, y)
+    return out
 
 
 def _style(ax) -> None:
@@ -62,16 +99,18 @@ def _mark_extrapolation(ax, last_anchor: float, upper: float) -> None:
     ax.axvline(last_anchor, color="#b98c7d", linewidth=0.9, linestyle="--", zorder=1)
 
 
-def draw_component_panels(model: CompositionModel, capacities: np.ndarray):
+def draw_component_panels(model: CompositionWithCells, capacities: np.ndarray,
+                          chemistry: str, sheet: dict | None = None):
     params = model.params
     figure_params, mc = params.capacity_figure, params.monte_carlo
-    chemistry = figure_params.components_figure_chemistry
+    is_cell = model.is_cell(chemistry)
 
     curves = model.component_curves(capacities, chemistry=chemistry)
     keys, central, lower, upper = (curves["keys"], curves["central"],
                                    curves["lower"], curves["upper"])
     anchor_x, anchor_y = curves["anchor_capacities"], curves["anchor_mass"]
     last_anchor = float(anchor_x[-1])
+    capacities = curves["capacities"]            # a sodium cell is drawn on a coarser grid
 
     n_panels = len(keys)
     columns = 4
@@ -87,8 +126,18 @@ def draw_component_panels(model: CompositionModel, capacities: np.ndarray):
             ax.fill_between(capacities, lower[index], upper[index],
                             color=BAND, alpha=0.45, linewidth=0)
         ax.plot(capacities, central[index], color=CURVE, linewidth=1.8)
-        ax.plot(anchor_x, anchor_y[index], "o", color=ANCHOR, markersize=4.5,
-                zorder=3, label="workbook")
+        if is_cell:
+            # No workbook dots: this chemistry is built from literature. The sodium
+            # sheet is what there is to compare against, and it is not what the
+            # curve is made from.
+            points = (sheet or {}).get(keys.loc[index, "component"])
+            if points is not None:
+                inside = (points[0] >= capacities[0]) & (points[0] <= capacities[-1])
+                ax.plot(points[0][inside], points[1][inside], "D", color=SHEET,
+                        markersize=5, zorder=3, label="sodium spreadsheet")
+        else:
+            ax.plot(anchor_x, anchor_y[index], "o", color=ANCHOR, markersize=4.5,
+                    zorder=3, label="workbook")
         branch = "pack" if keys.loc[index, "chemistry"] == params.scope.pack_level_key else "cell"
         ax.set_title(f"{keys.loc[index, 'component']}", fontsize=8.5, loc="left", color=INK)
         ax.text(0.015, 0.90, branch, transform=ax.transAxes, fontsize=7,
@@ -100,30 +149,48 @@ def draw_component_panels(model: CompositionModel, capacities: np.ndarray):
         ax.axis("off")
     for ax in axes[max(0, n_panels - columns):n_panels]:
         ax.set_xlabel("battery capacity [kWh]", fontsize=8)
+        # sharex hides the numbers on every row but the last, so with a panel count
+        # that is not a multiple of four the panels above a short last row were
+        # labelled "battery capacity" and carried no numbers. Thirteen components
+        # (the sodium cells) is exactly that case.
+        ax.tick_params(labelbottom=True)
     for row in range(rows):
         axes[row * columns].set_ylabel("mass [kg]", fontsize=8)
 
     band_text = (f"shaded band = Monte Carlo p{mc.lower_percentile:g}–p{mc.upper_percentile:g}, "
                  f"{mc.n_draws:,} draws, {mc.distribution}"
                  if mc.enabled else "Monte Carlo disabled")
-    fig.suptitle(
-        f"Battery component mass against capacity — {chemistry}\n"
-        f"dots = the workbook's five BEV sizes · line = {params.interpolation.interpolation_method} "
-        f"interpolation · shaded area past {last_anchor:g} kWh = linear extrapolation · {band_text}",
-        fontsize=11, ha="left", x=0.008, y=0.995)
-    fig.text(0.008, 0.005,
-             "The workbook's min/max is a flat ±10% of the value on every row, whatever "
-             "the source count — so the band is that convention carried through the "
-             "arithmetic, not evidence about how well these numbers are known.",
-             fontsize=7.5, color="#8a3b3b")
+    if is_cell:
+        fig.suptitle(
+            f"Battery component mass against capacity — {chemistry}\n"
+            f"line = median of the draws · shaded area past {last_anchor:g} kWh = extrapolation · {band_text}\n"
+            "diamonds = the cell breakdown in the sodium spreadsheet "
+            f"({Path(params.capacity_figure.sodium_sheet_file).name}), for comparison only",
+            fontsize=11, ha="left", x=0.008, y=0.995)
+        fig.text(0.008, 0.005,
+                 "Sodium cells are calculated from published cell figures, not measured. Where line and "
+                 "diamonds disagree (casing, separator), the line takes the part from the LFP cell and "
+                 "the spreadsheet assumes a share of the cell weight; neither is measured.",
+                 fontsize=7.5, color="#8a3b3b")
+    else:
+        fig.suptitle(
+            f"Battery component mass against capacity — {chemistry}\n"
+            f"dots = the workbook's five BEV sizes · line = {params.interpolation.interpolation_method} "
+            f"interpolation · shaded area past {last_anchor:g} kWh = linear extrapolation · {band_text}",
+            fontsize=11, ha="left", x=0.008, y=0.995)
+        fig.text(0.008, 0.005,
+                 "The workbook's min/max is a flat ±10% of the value on every row, whatever "
+                 "the source count — so the band is that convention carried through the "
+                 "arithmetic, not evidence about how well these numbers are known.",
+                 fontsize=7.5, color="#8a3b3b")
     fig.tight_layout(rect=[0, 0.02, 1, 0.94])
     return fig
 
 
-def draw_totals(model: CompositionModel, capacities: np.ndarray):
+def draw_totals(model: CompositionWithCells, capacities: np.ndarray):
     params = model.params
     figure_params, mc = params.capacity_figure, params.monte_carlo
-    chemistries = sorted(set(model._series.keys["chemistry"]) - {params.scope.pack_level_key})
+    chemistries = model.chemistries()
     last_anchor = float(model._series.capacities[-1])
 
     fig, (ax_mass, ax_density) = plt.subplots(
@@ -141,10 +208,11 @@ def draw_totals(model: CompositionModel, capacities: np.ndarray):
         curve = model.total_mass_curve(capacities, chemistry=chemistry)
         colour = params.scenarios.workbook_chemistry_colours.get(
             chemistry, colours(index % 10))
+        style = "--" if model.is_cell(chemistry) else "-"
         ax_mass.plot(curve.capacity_kwh, curve.mass_kg, color=colour,
-                     linewidth=1.1, label=chemistry)
+                     linewidth=1.1, linestyle=style, label=chemistry)
         ax_density.plot(curve.capacity_kwh, curve.capacity_kwh * 1000 / curve.mass_kg,
-                        color=colour, linewidth=1.1)
+                        color=colour, linewidth=1.1, linestyle=style)
         if mc.enabled and low in curve:
             ax_mass.fill_between(curve.capacity_kwh, curve[low], curve[high],
                                  color=colour, alpha=0.13, linewidth=0)
@@ -172,7 +240,8 @@ def draw_totals(model: CompositionModel, capacities: np.ndarray):
     fig.suptitle(
         "Whole-battery mass against capacity, by chemistry — band is the "
         f"{mc.lower_percentile:g}\u2013{mc.upper_percentile:g} percentile of the Monte Carlo\n"
-        f"shaded area past {last_anchor:g} kWh is extrapolated, not data",
+        f"shaded area past {last_anchor:g} kWh is extrapolated, not data · dashed: sodium cells "
+        "built from literature, drawn at their median",
         fontsize=11, ha="left", x=0.008, y=0.99)
     fig.text(0.008, 0.005,
              "Read the right-hand panel as a sanity check on the left one: a straight-line "
@@ -201,7 +270,7 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     try:
-        model = CompositionModel(params, project_root=PROJECT_ROOT)
+        model = CompositionWithCells(CompositionModel(params, project_root=PROJECT_ROOT))
         chemistry = args.chemistry or params.capacity_figure.components_figure_chemistry
 
         table = model.weights_at(args.capacity, chemistry=chemistry, level=args.level,
@@ -244,8 +313,16 @@ def main(argv: list[str] | None = None) -> int:
     capacities = np.linspace(figure_params.plot_min_kwh, figure_params.plot_max_kwh,
                              figure_params.plot_points)
 
-    for figure, name in ((draw_component_panels(model, capacities), figure_params.components_file_name),
-                         (draw_totals(model, capacities), figure_params.totals_file_name)):
+    sheet = read_sodium_sheet(params, PROJECT_ROOT)
+    stem, _, suffix = figure_params.components_file_name.rpartition(".")
+    jobs = [(draw_component_panels(model, capacities, figure_params.components_figure_chemistry),
+             figure_params.components_file_name)]
+    # One component figure for each sodium cell, beside the configured lithium one.
+    for cell in sorted(params.export.literature_chemistry_template):
+        jobs.append((draw_component_panels(model, capacities, cell, sheet),
+                     f"{stem}_{cell}.{suffix}"))
+    jobs.append((draw_totals(model, capacities), figure_params.totals_file_name))
+    for figure, name in jobs:
         path = params.output_path(PROJECT_ROOT, name)
         figure.savefig(path, dpi=params.drawing.output_dpi, bbox_inches="tight", facecolor="white")
         print(f"Saved {path}")

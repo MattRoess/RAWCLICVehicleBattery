@@ -33,16 +33,15 @@ about 5% lower and would understate every mass by that much.
 batteryCellSeparator have no element rows in the workbook -- about 8% of pack
 mass. Both levels are written so the gap is visible rather than inferred.
 
-⚠️ SODIUM-ION AND SOLID-STATE have no composition in the workbook. Only their
-PACKAGING is claimed; the cathode, anode and electrolyte are written as
-unknownBatteryMaterial. What may be claimed about them, and why, is in
-`export.unknown_chemistry_template`.
+⚠️ SOLID-STATE has no composition in the workbook. Only its PACKAGING is claimed;
+the cathode, anode and electrolyte are written as unknownBatteryMaterial. What may
+be claimed about it, and why, is in `export.unknown_chemistry_template`.
 
-⚠️ TWO SODIUM-ION CELLS ARE BUILT FROM LITERATURE (2026-10-02), `Na_ion_layered`
-and `Na_ion_prussian_white`: layered oxide and Prussian white, written beside
-`Na_ion`, which is unchanged. Their packaging is claimed exactly as sodium's is;
-their cathode, anode and electrolyte are an electrochemical mass balance with
-every input drawn (src/sodium_composition.py), and the mass that balance does not
+⚠️ SODIUM-ION IS TWO CELLS BUILT FROM LITERATURE (2026-10-02), `Na_ion_layered`
+and `Na_ion_prussian_white`: layered oxide and Prussian white. There is no
+chemistry called `Na_ion` any more. Their packaging is claimed from LFP; their
+cathode, anode and electrolyte are an electrochemical mass balance with every
+input drawn (src/sodium_composition.py), and the mass that balance does not
 explain is its own component, `batteryCellUnitemised`. A scenario, not a bill of
 materials -- the source says none is public.
 """
@@ -65,9 +64,13 @@ from typing import NamedTuple
 import numpy as np  # noqa: E402
 import pandas as pd  # noqa: E402
 
-from src.composition import (CompositionError, CompositionModel,  # noqa: E402
-                             approximate_mode)
+from src.composition import (MODULE_ENCLOSURE, CompositionError,  # noqa: E402
+                             CompositionModel, approximate_mode)
 from src import sodium_composition as sodium  # noqa: E402
+from src.unknown_chemistries import (  # noqa: E402
+    lithium_cathode_range, sodium_inputs, sodium_masses, sodium_packaging,
+    sodium_wholes, unknown_packaging_draws, unknown_scale_draws, unknown_template,
+    unknown_template_draws)
 from src.params_schema import ParameterError, current  # noqa: E402
 
 LAST_OBSERVED_YEAR = 2026
@@ -178,7 +181,7 @@ def split_module_enclosure(rows: pd.DataFrame, params) -> pd.DataFrame:
     model consumes.
     """
     split = params.technology.module_enclosure_split
-    component = "batteryPackModuleEnclosuresAndCoolantManifolds"
+    component = MODULE_ENCLOSURE
     mass_columns = [c for c in rows.columns
                     if c.startswith("mass_") or c == "kg_per_kwh"]
     source = rows[(rows.component == component) & (rows.level == "element")]
@@ -405,38 +408,6 @@ def apply_material_overrides(rows: pd.DataFrame, params) -> pd.DataFrame:
     return pd.concat([keep, pd.DataFrame(expanded)], ignore_index=True) if expanded else keep
 
 
-_UNKNOWN_SCALE_DRAWS: dict[str, np.ndarray] = {}
-
-
-def unknown_scale_draws(params, chemistry: str) -> np.ndarray | None:
-    """
-    How much the inherited packaging is trusted, as draws -- shape (n_draws,).
-
-    ⚠️ DRAWN ONCE PER CHEMISTRY AND CACHED, exactly like `improvement_draws`.
-    It is one doubt about one inheritance -- "we took LFP's casing" is not "we
-    know the casing" -- not an independent error per row. Drawn per row it would
-    cancel in any sum and a pack total would come out falsely certain.
-    """
-    band = params.technology.unknown_chemistry_mass_scale.get(chemistry)
-    if band is None or not params.monte_carlo.enabled:
-        return None
-    if chemistry in _UNKNOWN_SCALE_DRAWS:
-        return _UNKNOWN_SCALE_DRAWS[chemistry]
-    mc = params.monte_carlo
-    # +2: neither the workbook's stream (+0) nor the improvement's (+1).
-    # crc32, NOT hash(): Python randomises string hashes per process, so a seed
-    # built from hash() changed between runs -- measured 19, 697 and 922 for
-    # 'Na_ion' in three processes -- and the packaging-trust draws with it. The
-    # same settings gave different files. Fixed 2026-10-02; the draws of Na_ion
-    # and solid_state are therefore different from every run before this date,
-    # and from now on identical from one run to the next.
-    seed = mc.random_seed + 2 + (zlib.crc32(chemistry.encode()) % 1000)
-    rng = np.random.default_rng(seed)
-    _UNKNOWN_SCALE_DRAWS[chemistry] = rng.triangular(
-        float(band["min"]), float(band["mode"]), float(band["max"]), size=mc.n_draws)
-    return _UNKNOWN_SCALE_DRAWS[chemistry]
-
-
 def unknown_scaled_statistics(model: CompositionModel, params, chemistry: str,
                               capacity: float, year: float) -> pd.DataFrame:
     """
@@ -528,109 +499,6 @@ def unknown_scaled_statistics(model: CompositionModel, params, chemistry: str,
             "mass_p97.5": float(np.percentile(row, mc.upper_percentile)),
         })
     return pd.DataFrame(out)
-
-
-def unknown_template(params, chemistry: str) -> dict:
-    """
-    The template of a chemistry that is not in the workbook: one of the two with
-    no composition, or one of the sodium cells built from literature. Both carry
-    the same keys, so everything that claims packaging reads them alike.
-    """
-    export = params.export
-    if chemistry in export.unknown_chemistry_template:
-        return export.unknown_chemistry_template[chemistry]
-    return export.literature_chemistry_template[chemistry]
-
-
-_SODIUM_CACHE: dict = {}
-_SODIUM_VERIFIED: set = set()
-
-
-def lithium_cathode_range(model: CompositionModel, params,
-                          capacity: float = 80.0) -> tuple[float, float]:
-    """
-    The lowest and highest cathode energy per gram among the workbook's
-    chemistries, MEASURED NOW from the workbook rather than written down: the
-    anchor the sodium cathode is checked against, so it follows the workbook if
-    the workbook changes.
-    """
-    key = ("lithium range", float(capacity))
-    if key not in _SODIUM_CACHE:
-        per_gram = []
-        for chemistry in sorted(set(model._series.keys.chemistry)
-                                - {params.scope.pack_level_key}):
-            table = model.weights_at(capacity, chemistry=chemistry, level="component")
-            mass = float(table.loc[table.component == sodium.CATHODE, "mass_kg"].sum())
-            if mass > 0:
-                per_gram.append(capacity / mass)        # kWh / kg == Wh / g
-        _SODIUM_CACHE[key] = (min(per_gram), max(per_gram))
-    return _SODIUM_CACHE[key]
-
-
-def sodium_packaging(model: CompositionModel, params, chemistry: str,
-                     capacity: float) -> np.ndarray:
-    """
-    What the claimed casing, separator and collectors weigh in each draw, kg.
-
-    Taken from the SAME packaging draws the arrays carry -- template factors,
-    conductance scaling and trust factor included -- so the remainder is the
-    cell minus exactly what is already counted.
-    """
-    key = ("packaging", chemistry, round(float(capacity), 6))
-    if key not in _SODIUM_CACHE:
-        keys, draws = unknown_packaging_draws(model, params, chemistry, capacity)
-        named = params.technology.sodium_cell["packaging_components"]
-        rows = ((keys.code == params.scope.component_parameter_code)
-                & keys.component.isin(named)).to_numpy()
-        if int(rows.sum()) != len(named):
-            raise sodium.SodiumCompositionError(
-                f"{chemistry}: expected one component-level row for each of {named}, "
-                f"found {int(rows.sum())}.")
-        _SODIUM_CACHE[key] = draws[rows].sum(axis=0)
-    return _SODIUM_CACHE[key]
-
-
-def sodium_inputs(model: CompositionModel, params, chemistry: str) -> sodium.Inputs:
-    """
-    The sodium cell's inputs, drawn ONCE per chemistry and shared by every
-    capacity, year and row, conditioned so no anchor has a negative remainder.
-    """
-    key = ("inputs", chemistry)
-    if key not in _SODIUM_CACHE:
-        anchors = [float(c) for c in model._series.capacities]
-        packaging = {a: sodium_packaging(model, params, chemistry, a) for a in anchors}
-        inputs, report = sodium.conditioned_inputs(
-            params, chemistry, params.monte_carlo.n_draws, packaging)
-        worst = max(report["shift"].items(), key=lambda item: abs(item[1]))
-        print(f"    [{chemistry}] sodium cell drawn: {100 * report['redrawn']:.2f}% of "
-              f"draws redrawn for a negative remainder across {len(anchors)} anchors; "
-              f"conditioning moved {worst[0]} by {100 * worst[1]:+.2f}% at most")
-        _SODIUM_CACHE[key] = inputs
-    return _SODIUM_CACHE[key]
-
-
-def sodium_masses(model: CompositionModel, params, chemistry: str,
-                  capacity: float) -> sodium.Masses:
-    """
-    The cell of one battery at `capacity`, base year, checked the first time it
-    is made at that capacity. Both output paths call this and nothing else, so
-    they cannot disagree about what the cell weighs.
-    """
-    masses = sodium.masses_at(params, chemistry, sodium_inputs(model, params, chemistry),
-                              capacity, sodium_packaging(model, params, chemistry, capacity))
-    marker = (chemistry, round(float(capacity), 6))
-    if marker not in _SODIUM_VERIFIED:
-        sodium.verify(params, chemistry, masses, capacity,
-                      sodium_packaging(model, params, chemistry, capacity),
-                      lithium_cathode_range(model, params))
-        _SODIUM_VERIFIED.add(marker)
-    return masses
-
-
-def sodium_wholes(masses: sodium.Masses) -> dict:
-    """The four components the sodium cell owns, by name."""
-    return {sodium.CATHODE: masses.cathode, sodium.ANODE: masses.anode,
-            sodium.ELECTROLYTE: masses.electrolyte, sodium.REMAINDER: masses.remainder}
 
 
 def fill_sodium_cell(model: CompositionModel, params, chemistry: str,
@@ -900,7 +768,7 @@ LEVEL_CODES = {"component": "component_parameter_code",
                "element": "element_parameter_code"}
 
 # The two chemistries with no composition in the workbook, drawn dashed.
-UNKNOWN_COMPOSITION = ("Na_ion", "solid_state")
+UNKNOWN_COMPOSITION = ("solid_state",)
 
 
 
@@ -1061,7 +929,7 @@ def apply_pack_rules_to_draws(keys: pd.DataFrame, draws: np.ndarray, params,
     # 1. Split the module enclosure FIRST, so only its iron half is available to
     #    scale. The component's own total does not move -- only its makeup.
     split = tech.module_enclosure_split
-    enclosure = "batteryPackModuleEnclosuresAndCoolantManifolds"
+    enclosure = MODULE_ENCLOSURE
     in_enclosure = component == enclosure
     if split and in_enclosure.any():
         pooled = masses[in_enclosure].sum(axis=0)
@@ -1195,120 +1063,6 @@ def check_draws_match_workbook(model: CompositionModel, params, chemistry: str,
                         f"draws mean {got:.4f} kg against the workbook's "
                         f"{expected:.4f} kg, {off:.2%} apart. The two paths "
                         "through the pack rules have drifted.")
-
-
-def unknown_packaging_draws(model: CompositionModel, params, chemistry: str,
-                            capacity: float) -> tuple[pd.DataFrame, np.ndarray]:
-    """
-    THE PACKAGING HALF of `unknown_template_draws`: everything the template
-    claims, with the cathode, anode and electrolyte at ZERO.
-
-    (keys, masses) for a chemistry with no composition of its own, in the shape
-    `component_element_draws_at(code=None)` returns and ready for the pack rules.
-
-    WHY THIS EXISTS. These two chemistries were the only ones with no persisted
-    draws, so stage 04_04 downstream could not read them at all and dropped the
-    whole car -- the frame, the enclosure, the cables and both collectors along
-    with the cathode nobody knows. That threw away roughly half of each pack by
-    mass for no reason beyond the export.
-
-    WHAT IT CLAIMS AND WHAT IT DOES NOT. The packaging is the base chemistry's,
-    at the base chemistry's mass: a sodium pack is built like the LFP pack it is
-    derived from. The active materials are ZERO here, and zero means "this model
-    does not describe it" -- the consumer must keep reporting them as a gap, or
-    a pack will read as fully known when its cathode is not.
-
-    It is a second path to the same numbers as `build_unknown_rows`, which is a
-    risk this project has been bitten by three times.
-    `check_unknown_draws_match_workbook()` compares them on every run.
-    """
-    template = unknown_template(params, chemistry)
-    keys, draws = model.component_element_draws_at(
-        capacity, chemistry=template["based_on"], code=None)
-    keys = keys.copy()
-    draws = np.asarray(draws, dtype=np.float64).copy()
-
-    keep = ~keys.component.isin(template["remove_components"]).to_numpy()
-    keys, draws = keys[keep].reset_index(drop=True), draws[keep]
-
-    # The template's deterministic factors, and the component rows with them:
-    # a factor keyed on an element misses the row that carries no element, and
-    # that is how currentCollectorAnode once read 26.7 kg at component level
-    # against 11.9 at element level. The component takes the factor its own
-    # elements imply, mass-weighted PER DRAW.
-    element_rows = (keys.code == params.scope.element_parameter_code).to_numpy()
-    for component, by_element in template["mass_scale"].items():
-        at_component = (keys.component == component).to_numpy()
-        here = at_component & element_rows
-        if not here.any():
-            continue
-        total = draws[here].sum(axis=0)
-        scaled = np.zeros_like(total)
-        for position in np.where(here)[0]:
-            scaled += draws[position] * float(
-                by_element.get(str(keys.element.iloc[position]), 1.0))
-        with np.errstate(divide="ignore", invalid="ignore"):
-            weighted = np.where(total > 0, scaled / total, 1.0)
-        whole = at_component & ~element_rows
-        if whole.any():
-            draws[whole] *= weighted[None, :]
-        for element, factor in by_element.items():
-            target = at_component & (keys.element == element).to_numpy() & element_rows
-            draws[target] *= float(factor)
-
-    # The swaps rename, they do not scale. Two rows can collapse into one and
-    # are summed by the pack rules afterwards, not dropped.
-    for component, mapping in template["element_swaps"].items():
-        target = keys.component == component
-        keys.loc[target, "element"] = keys.loc[target, "element"].replace(mapping)
-
-    # How much the inherited packaging is trusted -- one doubt about one
-    # inheritance, drawn once per chemistry, on the components it was inherited
-    # for and no others.
-    scale = unknown_scale_draws(params, chemistry)
-    if scale is not None:
-        in_scope = keys.component.isin(
-            params.technology.unknown_chemistry_scaled_components).to_numpy()
-        draws[in_scope] *= np.asarray(scale)[None, :]
-
-    # What is NOT claimed is zero, and zero here means unknown. The cathode, the
-    # anode and the electrolyte keep nothing: a plausible number borrowed from a
-    # lithium chemistry is a claim nobody made.
-    unclaimed = ~keys.component.isin(template["claim_masses_for"]).to_numpy()
-    draws[unclaimed] = 0.0
-    return keys, draws
-
-
-def unknown_template_draws(model: CompositionModel, params, chemistry: str,
-                           capacity: float) -> tuple[pd.DataFrame, np.ndarray]:
-    """
-    (keys, masses) for a chemistry that is not in the workbook, ready for the
-    pack rules.
-
-    The two with no composition are the packaging alone. A sodium cell built
-    from literature has its cathode, anode and electrolyte replaced by the draws
-    of `sodium_masses`, element by element, and the unitemised remainder added as
-    a component of its own.
-    """
-    keys, draws = unknown_packaging_draws(model, params, chemistry, capacity)
-    if not sodium.is_sodium_cell(params, chemistry):
-        return keys, draws
-
-    masses = sodium_masses(model, params, chemistry, capacity)
-    scope = params.scope
-    drop = keys.component.isin(sodium.ACTIVE_COMPONENTS).to_numpy()
-    keys, draws = keys[~drop].reset_index(drop=True), draws[~drop]
-    added_keys, added_draws = [], []
-    for component, whole in sodium_wholes(masses).items():
-        added_keys.append({"chemistry": chemistry, "component": component,
-                           "element": "n/a", "code": scope.component_parameter_code})
-        added_draws.append(whole)
-        for element, kg in masses.elements.get(component, {}).items():
-            added_keys.append({"chemistry": chemistry, "component": component,
-                               "element": element, "code": scope.element_parameter_code})
-            added_draws.append(kg)
-    return (pd.concat([keys, pd.DataFrame(added_keys)], ignore_index=True),
-            np.vstack([draws] + [row[None, :] for row in added_draws]))
 
 
 def check_unknown_draws_match_workbook(model: CompositionModel, params,
@@ -1855,10 +1609,10 @@ def main(argv: list[str] | None = None) -> int:
     directory = PROJECT_ROOT / params.export.consolidated_output_dir
     directory.mkdir(parents=True, exist_ok=True)
     known = sorted(set(model._series.keys["chemistry"]) - {params.scope.pack_level_key})
-    # Na_ion and solid_state are not IN the workbook, so they are not in
-    # model._series -- they are built from a base chemistry by
-    # export.unknown_chemistry_template. Leaving them out would have shipped
-    # seven files where nine were asked for.
+    # solid_state and the two sodium cells are not IN the workbook, so they are not
+    # in model._series -- they are built from a base chemistry by
+    # export.unknown_chemistry_template and export.literature_chemistry_template.
+    # Leaving them out would have shipped seven files where ten were asked for.
     unknown = sorted(params.export.unknown_chemistry_template) + literature
 
     print(f"{params.monte_carlo.n_draws:,} draws | anchors {[int(a) for a in anchors]} "

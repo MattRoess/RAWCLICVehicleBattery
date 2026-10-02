@@ -87,6 +87,10 @@ from src.params_schema import Params
 # Series identity: one curve of mass against capacity.
 SERIES_KEYS = ["chemistry", "component", "element", "code"]
 
+# The one component the pack rules split between aluminium and iron
+# (`technology.module_enclosure_split`), because the workbook files all of it as iron.
+MODULE_ENCLOSURE = "batteryPackModuleEnclosuresAndCoolantManifolds"
+
 LEVELS = ("component", "material", "element")
 
 # The workbook's proportional band has to hold to this tolerance for the

@@ -15,13 +15,16 @@ as a forecast.
 WHAT IT CAN AND CANNOT TELL YOU
 --------------------------------
 It gives the SHARE of each chemistry, per segment group, per year. It does not
-give material mass for sodium-ion or bipolar solid-state, because the
-composition workbook has neither and neither is a variant of what it has:
-sodium replaces the copper anode current collector with aluminium, and bipolar
-solid-state deletes the separator, the liquid electrolyte and the per-cell
-terminals outright. `composition_coverage` reports how much of each scenario-year
-can be costed in materials at all, so the gap is visible instead of being filled
-with a lookalike chemistry.
+give material mass for bipolar solid-state, because the composition workbook
+has none and it is not a variant of what it has: it deletes the separator, the
+liquid electrolyte and the per-cell terminals outright. `composition_coverage`
+reports how much of each scenario-year can be costed in materials at all, so the
+gap is visible instead of being filled with a lookalike chemistry.
+
+Sodium-ion is no longer in that position: it has a composition for each of the
+two cells built from literature (`export.literature_chemistry_template`). The
+scenarios still give it ONE share, `Na_ion`, which is not split between the two
+cells, so a material mass for it needs that split first.
 
 THE OUTFLOW LAG, WHICH IS EASY TO FORGET
 -----------------------------------------
@@ -101,7 +104,7 @@ class ChemistryScenarios:
     def composition_coverage(self, last_year: int = 2070) -> pd.DataFrame:
         """
         Per scenario, group and year: what fraction of the market has a
-        composition in the workbook at all.
+        composition at all.
 
         This is the number that decides whether a material result can be
         computed, and it falls a long way in scenarios 2 and 3. Reporting it is

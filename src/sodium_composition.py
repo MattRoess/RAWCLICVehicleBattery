@@ -63,6 +63,9 @@ ACTIVE_COMPONENTS = (CATHODE, ANODE, ELECTROLYTE)
 # The mass the cell carries that no source itemises. A component of its own.
 REMAINDER = "batteryCellUnitemised"
 
+# The anode is hard carbon.
+ANODE_ELEMENT = "C"
+
 # Standard atomic weights, g/mol. Physical constants, not settings.
 ATOMIC_MASS = {
     "H": 1.008, "C": 12.011, "N": 14.007, "O": 15.999, "F": 18.998,
@@ -204,8 +207,18 @@ def masses_at(params, chemistry: str, inputs: Inputs, capacity_kwh: float,
     return Masses(
         cathode=cathode, anode=anode, electrolyte=electrolyte, remainder=remainder,
         cell=cell,
-        elements={CATHODE: cathode_elements, ANODE: {"C": anode},
+        elements={CATHODE: cathode_elements, ANODE: {ANODE_ELEMENT: anode},
                   ELECTROLYTE: electrolyte_elements})
+
+
+def elements_of(params, chemistry: str) -> dict[str, tuple[str, ...]]:
+    """
+    The elements each of the cell's own parts is made of -- names only, no masses.
+    Read from the same settings `masses_at` builds the masses from.
+    """
+    return {CATHODE: tuple(params.technology.sodium_cathode[chemistry]["formula"]),
+            ANODE: (ANODE_ELEMENT,),
+            ELECTROLYTE: tuple(params.technology.sodium_cell["salt_formula"])}
 
 
 def seed_for(params, chemistry: str) -> int:
