@@ -1255,23 +1255,32 @@ class TechnologyParams:
     # WHERE AN ELEMENT'S SHARE OF ITS COMPONENT IS NOT BELIEVED, as a fraction
     # of that component's mass: chemistry -> component -> element -> share.
     #
-    # battLiMFP's lithium is 3.45% of its cathode where every other chemistry
-    # lands on its own stoichiometry -- LFP 4.59% against 4.40% for LiFePO4, the
-    # three NMCs 7.29-7.37% against 7.19%, NCA 7.40%. LMFP cannot be the
-    # exception: LiMnxFe1-xPO4 carries the same lithium per formula unit as
-    # LiFePO4, and manganese (54.94) and iron (55.85) weigh almost the same, so
-    # its share must be LFP's. 3.45% is 22% short.
+    # EMPTY SINCE 2026-09-17, AND THE ENTRY THAT WAS HERE IS WHY IT SHOULD STAY
+    # EMPTY. It read {"battLiMFP_subsub": {"cathodeActiveMaterial": {"Li":
+    # 0.0440}}}, on the grounds that LMFP's lithium was 22% short of the
+    # stoichiometry every other chemistry lands on. The observation was right
+    # and the diagnosis was one element too narrow: lithium was not short on its
+    # own. Oxygen and phosphorus were short by the SAME factor, 0.7395, while
+    # manganese and iron sat at 1.479 -- exactly twice it. The workbook had
+    # given Mn and Fe a full formula unit each instead of the half that
+    # LiMn(0.5)Fe(0.5)PO4 carries, and had then normalised the five rows back
+    # to the component, which deflated the other three.
     #
-    # This is the SECOND defect in battLiMFP, after its energy density, from the
-    # same count_value = 1, DQS = 2 source. Both are corrected here rather than
-    # in the workbook, so a WP3 revision can simply remove them.
-    # SAFE TO CHANGE: yes. Element rows do not have to sum to their component --
-    # the workbook resolves only part of most components at element level -- so
-    # setting one share does not disturb the others.
+    # Raising lithium alone left the cathode's element rows summing to 101.15%
+    # of the component -- and every cathode in this workbook is fully resolved,
+    # 100.00% for all seven chemistries, so that 1.15% was mass invented out of
+    # a patch. It is what made the recovery model refuse the battery case with
+    # a negative rest.
+    #
+    # FIXED AT THE SOURCE instead: the workbook's five LMFP cathode rows now
+    # partition the component stoichiometrically, and lithium arrives at 4.408%
+    # on its own. An override here would double-correct it.
+    #
+    # SAFE TO CHANGE: only with a reason that names WHY a number is wrong. A
+    # share that looks wrong next to its neighbours usually means the neighbours
+    # are wrong too -- correcting the one that was noticed hides the rest.
     element_share_of_component_override: dict[str, dict[str, dict[str, float]]] = field(
-        default_factory=lambda: {
-            "battLiMFP_subsub": {"cathodeActiveMaterial": {"Li": 0.0440}},
-        })
+        default_factory=dict)
 
     chemistry_energy_density: dict[str, dict] = field(default_factory=lambda: {
         # 400 Wh/kg is where solid-state cells ARE, not where they arrive in 2040.
