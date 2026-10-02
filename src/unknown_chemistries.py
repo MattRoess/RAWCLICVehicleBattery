@@ -309,9 +309,7 @@ class CompositionWithCells:
         self._series = model._series
 
     def chemistries(self) -> list[str]:
-        scope = self.params.scope
-        workbook = sorted(set(self._series.keys["chemistry"]) - {scope.pack_level_key})
-        return workbook + sorted(self.params.export.literature_chemistry_template)
+        return self.model.chemistries() + self.params.cells_in_scope()
 
     def is_cell(self, chemistry: str) -> bool:
         return sodium.is_sodium_cell(self.params, chemistry)

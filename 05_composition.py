@@ -1313,8 +1313,7 @@ def collect_draws(model: CompositionModel, params, capacity: float, element: str
     meet in one column are the same draw.
     """
     out: dict[str, np.ndarray] = {}
-    known = sorted(set(model._series.keys["chemistry"])
-                   - {params.scope.pack_level_key})
+    known = model.chemistries()
     year = float(params.export.distribution_figure_year)
     year_draws = improvement_factor_draws(params, year)
     sources = []
@@ -1327,7 +1326,7 @@ def collect_draws(model: CompositionModel, params, capacity: float, element: str
     # THE SODIUM CELLS BUILT FROM LITERATURE, each its own line. They are not in
     # the workbook, so the loop above never saw them, and the nickel, copper and
     # manganese figures said nothing about the chemistries that put nickel back.
-    for chemistry in sorted(params.export.literature_chemistry_template):
+    for chemistry in params.cells_in_scope():
         sources.append((chemistry,) + sodium_element_draws(
             model, params, chemistry, capacity))
     for chemistry, elements, masses in sources:
@@ -1520,9 +1519,9 @@ def main(argv: list[str] | None = None) -> int:
         print(f"{error}", file=sys.stderr)
         return 1
 
-    chemistries = sorted(set(model._series.keys.chemistry) - {params.scope.pack_level_key})
-    missing = list(params.scenarios.chemistries_without_composition)
-    literature = sorted(params.export.literature_chemistry_template)
+    chemistries = model.chemistries()
+    missing = params.packaging_only_in_scope()
+    literature = params.cells_in_scope()
 
     print(f"Export years: {params.export_years()}")
     print("Capacity    : the workbook's own anchors "
@@ -1608,12 +1607,12 @@ def main(argv: list[str] | None = None) -> int:
     years = params.export_years()
     directory = PROJECT_ROOT / params.export.consolidated_output_dir
     directory.mkdir(parents=True, exist_ok=True)
-    known = sorted(set(model._series.keys["chemistry"]) - {params.scope.pack_level_key})
+    known = model.chemistries()
     # solid_state and the two sodium cells are not IN the workbook, so they are not
     # in model._series -- they are built from a base chemistry by
     # export.unknown_chemistry_template and export.literature_chemistry_template.
     # Leaving them out would have shipped seven files where ten were asked for.
-    unknown = sorted(params.export.unknown_chemistry_template) + literature
+    unknown = params.packaging_only_in_scope() + literature
 
     print(f"{params.monte_carlo.n_draws:,} draws | anchors {[int(a) for a in anchors]} "
           f"| years {years[0]}-{years[-1]} step {params.export.export_year_step} "
@@ -1890,7 +1889,7 @@ def main(argv: list[str] | None = None) -> int:
     # ONE FIGURE PER SODIUM CELL, with every element in a panel of its own.
     year_draws = improvement_factor_draws(
         params, float(params.export.distribution_figure_year))
-    for chemistry in sorted(params.export.literature_chemistry_template):
+    for chemistry in params.cells_in_scope():
         elements, masses = sodium_element_draws(model, params, chemistry, capacity)
         masses = masses * np.asarray(year_draws)[None, :]
         save_figure(draw_element_panels(chemistry, elements, masses, params, capacity),

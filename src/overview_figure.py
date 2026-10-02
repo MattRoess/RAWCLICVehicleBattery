@@ -259,7 +259,7 @@ def draw_overview(params, project_root, model) -> str:
         for key, short, material in members:
             columns.append(Column(key, short, material, colours[key], number,
                                   cells.structure(key)))
-    figure = draw(params, columns, list(params.scenarios.chemistries_without_composition))
+    figure = draw(params, columns, params.packaging_only_in_scope())
     path = params.output_path(project_root, drawing.output_file_name)
     figure.savefig(path, dpi=drawing.output_dpi, facecolor="white")
     return path.name

@@ -64,7 +64,7 @@ class PathParams:
 
 @dataclass
 class ScopeParams:
-    """Which part of the workbook this project reads."""
+    """Which part of the workbook this project reads, and which chemistries it calculates."""
 
     # The consolidated composition workbook, inside paths.input_dir.
     # SAFE TO CHANGE: yes, when a newer version of the file arrives.
@@ -76,6 +76,19 @@ class ScopeParams:
     # SAFE TO CHANGE: yes, but every value must have a matching sheet in the
     # workbook, and adding a size only helps if that sheet actually exists.
     bev_capacities_kwh: tuple[int, ...] = (25, 45, 60, 80, 100)
+
+    # THE CHEMISTRIES WE CALCULATE -- the one list. The composition files 05 writes
+    # and every figure follow it. Workbook chemistries are named by their `Layer 1`
+    # key; the two sodium cells (built from literature) and solid-state (packaging
+    # only, with NO composition) are named by theirs. The workbook also holds LMO and
+    # NCA: they are not used in EVs and are not calculated, so they are not here.
+    # SAFE TO CHANGE: yes. To calculate another workbook chemistry, add it here and
+    # give it an energy density, a cell-to-pack ratio and a colour (checked).
+    chemistries: tuple[str, ...] = (
+        "battLiFP_subsub", "battLiMFP_subsub",
+        "battLiNMC_lowNi", "battLiNMC_midNi", "battLiNMC_highNi",
+        "Na_ion_layered", "Na_ion_prussian_white", "solid_state",
+    )
 
     # How a capacity becomes a sheet name. `{kwh}` is filled with each value
     # above. This is also the workbook's `additionalSpecification` column.
@@ -134,16 +147,14 @@ class DrawingParams:
     # THE COLUMNS: one group per way the composition was arrived at, each with the
     # chemistries in it, left to right. Each chemistry is its key in the composition,
     # the short name written on top and, in grey under it, what its cathode is made of.
-    # A chemistry with a composition that is missing here is a chemistry the figure
-    # silently does not show, so the check at start-up refuses that.
+    # A chemistry in scope.chemistries that has a composition and is missing here is a
+    # chemistry the figure silently does not show, so the check at start-up refuses that.
     # SAFE TO CHANGE: yes -- names and order are wording and layout. To add a
     # chemistry add its row here as well as wherever it is calculated.
     overview_groups: tuple[tuple[str, str, tuple[tuple[str, str, str], ...]], ...] = (
         ("LITHIUM-ION", "from the project's composition data", (
             ("battLiFP_subsub", "LFP", "iron phosphate"),
             ("battLiMFP_subsub", "LMFP", "manganese iron phosphate"),
-            ("battLiMO_subsub", "LMO", "manganese oxide"),
-            ("battLiNCA_subsub", "NCA", "nickel cobalt aluminium oxide"),
             ("battLiNMC_lowNi", "NMC, low nickel", "nickel manganese cobalt oxide"),
             ("battLiNMC_midNi", "NMC, medium nickel", "nickel manganese cobalt oxide"),
             ("battLiNMC_highNi", "NMC, high nickel", "nickel manganese cobalt oxide"),
@@ -563,7 +574,6 @@ class EVDetailsParams:
     # SAFE TO CHANGE: yes.
     chemistry_groups: dict[str, tuple[str, ...]] = field(default_factory=lambda: {
         "LFP": ("LFP",),
-        "NCA": ("NCA",),
         "NMC_middle": ("NMC532", "NMC622"),
         "NMC_high": ("NMC712", "NMC721", "NMC811", "NMC", "NCM"),
     })
@@ -571,11 +581,12 @@ class EVDetailsParams:
     # NOT COVERED BY THE GROUPS ABOVE, and deliberately left out rather than
     # forced into one: 'NMC333' (5 models, all before 2019 -- graded, so not
     # "ungraded", but neither 532/622 nor 712/721/811) and 'LFP & NMC' (6
-    # models, either-or per variant). Together 11 of 1,244 models. They are
-    # reported on every run instead of disappearing quietly.
+    # models, either-or per variant), 11 of 1,244 models together, and 'NCA', which is
+    # not a chemistry this project calculates (scope.chemistries) and so belongs to no
+    # chemistry panel. They are reported on every run instead of disappearing quietly.
     # SAFE TO CHANGE: yes -- add them to a group above if you decide where they
     # belong; this list only silences the report.
-    chemistry_values_left_out: tuple[str, ...] = ("NMC333", "LFP & NMC")
+    chemistry_values_left_out: tuple[str, ...] = ("NMC333", "LFP & NMC", "NCA")
 
     # A segment-and-chemistry combination needs at least this many distinct
     # models before it is tabulated or drawn. Below it, a median is one
@@ -587,7 +598,6 @@ class EVDetailsParams:
     # SAFE TO CHANGE: yes -- presentation only.
     chemistry_colours: dict[str, str] = field(default_factory=lambda: {
         "LFP": "#2f8f5b",
-        "NCA": "#b07aa1",
         "NMC_middle": "#e08214",
         "NMC_high": "#1f5f8b",
     })
@@ -734,8 +744,6 @@ class ScenarioParams:
     workbook_chemistry_colours: dict[str, str] = field(default_factory=lambda: {
         "battLiFP_subsub": "#2f8f5b",     # LFP, green
         "battLiMFP_subsub": "#7fbf7b",    # LMFP, lighter green
-        "battLiMO_subsub": "#1b7837",     # LMO, darker green
-        "battLiNCA_subsub": "#b07aa1",    # NCA, mauve
         "battLiNMC_highNi": "#1f5f8b",    # blue
         "battLiNMC_midNi": "#e08214",     # orange
         "battLiNMC_lowNi": "#8c3d04",     # darker brown-orange
@@ -749,7 +757,7 @@ class ScenarioParams:
 
     scenario_colours: dict[str, str] = field(default_factory=lambda: {
         "LFP": "#2f8f5b", "LMFP": "#7fbf7b", "NMC_high": "#1f5f8b",
-        "NMC_middle": "#e08214", "NCA": "#b07aa1",
+        "NMC_middle": "#e08214",
         "Na_ion_layered": "#e0b030", "Na_ion_prussian_white": "#a0782a",
         "solid_state": "#6a51a3",
     })
@@ -1347,14 +1355,10 @@ class TechnologyParams:
         # come from SWITCHING chemistry, not from improving the old one.
         "battLiFP_subsub":   {"basis": "cell", "years": (2020, 2070),
                               "wh_per_kg": (233.0, 291.2)},
-        "battLiMO_subsub":   {"basis": "cell", "years": (2020, 2070),
-                              "wh_per_kg": (231.0, 288.8)},
         "battLiMFP_subsub":  {"basis": "cell", "years": (2020, 2070),
                               "wh_per_kg": (270.0, 337.5)},
         "battLiNMC_lowNi":   {"basis": "cell", "years": (2020, 2070),
                               "wh_per_kg": (285.0, 356.2)},
-        "battLiNCA_subsub":  {"basis": "cell", "years": (2020, 2070),
-                              "wh_per_kg": (306.0, 382.5)},
         "battLiNMC_midNi":   {"basis": "cell", "years": (2020, 2070),
                               "wh_per_kg": (311.0, 388.8)},
         "battLiNMC_highNi":  {"basis": "cell", "years": (2020, 2070),
@@ -1433,7 +1437,7 @@ class TechnologyParams:
     # 0.47x to 0.57x of today.
     cell_to_pack_ratio: dict[str, float] = field(default_factory=lambda: {
         "solid_state": 0.85,
-        # The seven lithium chemistries, MEASURED from the workbook at 75 kWh --
+        # The five lithium chemistries, MEASURED from the workbook at 75 kWh --
         # cell mass over pack mass. battLiMFP is 0.616 rather than the 0.563 it
         # showed before its density override, because pinning the cell heavier
         # raises the cell's share of a pack whose hardware did not change.
@@ -1441,8 +1445,6 @@ class TechnologyParams:
         # the pack hardware does not scale with the cells.
         "battLiFP_subsub": 0.650,
         "battLiMFP_subsub": 0.616,
-        "battLiMO_subsub": 0.652,
-        "battLiNCA_subsub": 0.585,
         "battLiNMC_highNi": 0.561,
         "battLiNMC_lowNi": 0.603,
         "battLiNMC_midNi": 0.582,
@@ -1607,6 +1609,16 @@ class Params:
                           self.export.last_export_year + 1,
                           self.export.export_year_step))
 
+    def cells_in_scope(self) -> list[str]:
+        """The sodium cells built from literature that `scope.chemistries` lists, sorted."""
+        return sorted(c for c in self.scope.chemistries
+                      if c in self.export.literature_chemistry_template)
+
+    def packaging_only_in_scope(self) -> list[str]:
+        """The listed chemistries with no composition of their own (solid-state), sorted."""
+        return sorted(c for c in self.scope.chemistries
+                      if c in self.scenarios.chemistries_without_composition)
+
     def output_path(self, project_root, file_name: str) -> "Path":
         """Where a figure goes, with the folder created if it is not there yet."""
         from pathlib import Path
@@ -1648,6 +1660,12 @@ class Params:
         if len(set(codes)) != 3:
             raise ParameterError(
                 f"the three parameterCode settings must differ from each other: {codes}")
+
+        if not scope.chemistries:
+            raise ParameterError("scope.chemistries is empty -- nothing would be calculated.")
+        if len(set(scope.chemistries)) != len(scope.chemistries):
+            raise ParameterError(
+                f"scope.chemistries names a chemistry twice: {list(scope.chemistries)}")
 
         if not drawing.output_file_name.endswith(".png"):
             raise ParameterError(
@@ -2124,15 +2142,33 @@ class Params:
             raise ParameterError(
                 "drawing.overview_groups lists a chemistry twice: "
                 f"{sorted({key for key in listed if listed.count(key) > 1})}")
-        has_composition = set(sc.workbook_chemistry_colours) - set(sc.chemistries_without_composition)
+        has_composition = set(self.scope.chemistries) - set(sc.chemistries_without_composition)
         left_out = sorted(has_composition - set(listed))
         not_one = sorted(set(listed) - has_composition)
         if left_out or not_one:
             raise ParameterError(
-                "drawing.overview_groups must list exactly the chemistries that have a "
-                f"composition. Left out: {left_out}. Listed but with no composition "
-                f"(or unknown): {not_one}. A chemistry left out here is one the figure "
+                "drawing.overview_groups must list exactly the chemistries of "
+                "scope.chemistries that have a composition. "
+                f"Left out: {left_out}. Listed but not in scope.chemistries, or with no "
+                f"composition: {not_one}. A chemistry left out here is one the figure "
                 "silently does not show.")
+        # THE ONE LIST: what the per-chemistry settings carry is what is calculated.
+        in_scope = set(self.scope.chemistries)
+        per_chemistry = (("technology.chemistry_energy_density", tech.chemistry_energy_density),
+                         ("technology.cell_to_pack_ratio", tech.cell_to_pack_ratio),
+                         ("scenarios.workbook_chemistry_colours", sc.workbook_chemistry_colours))
+        for label, entries in per_chemistry:
+            stray = sorted(set(entries) - in_scope)
+            if stray:
+                raise ParameterError(
+                    f"{label} has entries for {stray}, which scope.chemistries does not "
+                    "list, so they are not calculated. Delete the entries, or add the "
+                    "chemistries to the list.")
+        for label, entries in per_chemistry[::2]:
+            lacking = sorted(in_scope - set(entries))
+            if lacking:
+                raise ParameterError(
+                    f"scope.chemistries lists {lacking}, which {label} has no entry for.")
 
 
 def current() -> Params:

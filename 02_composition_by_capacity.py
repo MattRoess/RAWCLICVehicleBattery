@@ -318,7 +318,7 @@ def main(argv: list[str] | None = None) -> int:
     jobs = [(draw_component_panels(model, capacities, figure_params.components_figure_chemistry),
              figure_params.components_file_name)]
     # One component figure for each sodium cell, beside the configured lithium one.
-    for cell in sorted(params.export.literature_chemistry_template):
+    for cell in params.cells_in_scope():
         jobs.append((draw_component_panels(model, capacities, cell, sheet),
                      f"{stem}_{cell}.{suffix}"))
     jobs.append((draw_totals(model, capacities), figure_params.totals_file_name))

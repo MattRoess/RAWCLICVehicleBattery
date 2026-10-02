@@ -159,6 +159,23 @@ class CompositionModel:
         self._series = self._build_series()
         self._factors: np.ndarray | None = None
 
+    def chemistries(self) -> list[str]:
+        """
+        The workbook chemistries this project calculates: those of `scope.chemistries`
+        that are not built from a template, sorted, each checked to be in the workbook.
+        """
+        scope, export = self.params.scope, self.params.export
+        built = (set(export.literature_chemistry_template)
+                 | set(export.unknown_chemistry_template))
+        asked = sorted(c for c in scope.chemistries if c not in built)
+        present = set(self._series.keys["chemistry"]) - {scope.pack_level_key}
+        missing = sorted(set(asked) - present)
+        if missing:
+            raise CompositionError(
+                f"scope.chemistries names {missing}, which the workbook does not have. "
+                f"It has: {sorted(present)}")
+        return asked
+
     # ---------------------------------------------------------------- loading
     def _load(self) -> pd.DataFrame:
         if not self._path.exists():
