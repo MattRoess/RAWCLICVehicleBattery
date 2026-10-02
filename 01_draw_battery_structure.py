@@ -238,7 +238,8 @@ def draw(cell_side: list[dict], pack_side: list[dict], params: Params) -> plt.Fi
     # off here said the opposite.
     workbook_chemistries = sorted(
         set(params.scenarios.workbook_chemistry_colours)
-        - set(params.export.unknown_chemistry_template))
+        - set(params.export.unknown_chemistry_template)
+        - set(params.export.literature_chemistry_template))
     ax.text(0, 73.2,
             "Layer 1, in the workbook:  " + " · ".join(workbook_chemistries[:4]) + "\n"
             "                           " + " · ".join(workbook_chemistries[4:]),

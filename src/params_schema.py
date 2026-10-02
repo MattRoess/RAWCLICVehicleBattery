@@ -668,6 +668,11 @@ class ScenarioParams:
         "battLiNMC_lowNi": "#8c3d04",     # darker brown-orange
         "Na_ion": "#d9a441",              # sand
         "solid_state": "#6a51a3",         # violet
+        # The two sodium cells built from literature, two more shades of the
+        # sodium sand. Listed here, as Na_ion is, because the distribution
+        # figures look their colour up in this dict.
+        "Na_ion_layered": "#e0b030",          # gold
+        "Na_ion_prussian_white": "#a0782a",   # bronze
     })
 
     scenario_colours: dict[str, str] = field(default_factory=lambda: {
@@ -680,6 +685,35 @@ class ScenarioParams:
     scenario_file_name: str = "chemistry_scenarios_to_2070.png"
     scenario_figure_size_in: tuple[float, float] = (16.0, 9.0)
 
+
+
+def _sodium_packaging_template(note: str) -> dict:
+    """
+    What a sodium-ion cell's PACKAGING is taken to be, for the two cells built
+    from literature. It is the claim `unknown_chemistry_template["Na_ion"]`
+    makes -- LFP's casing, separator, terminals, collectors and pack hardware,
+    aluminium replacing copper on the anode collector at 0.4764 for equal
+    conductance -- written once so the two cannot drift apart. `Na_ion` itself
+    is left exactly as it was.
+    """
+    pack_hardware = ("batteryPackCellTerminals", "batteryPackCables",
+                     "batteryPackSupportFrame", "batteryPackThermalConductor",
+                     "batteryPackModuleEnclosuresAndCoolantManifolds")
+    return {
+        "based_on": "battLiFP_subsub",
+        "remove_components": (),
+        "element_swaps": {"currentCollectorAnode": {"Cu": "Al"},
+                          "batteryPackCellTerminals": {"Cu": "Al"}},
+        "assert_elements_for": ("currentCollectorAnode", "currentCollectorCathode",
+                                "batteryCellCasing", "batteryCellSeparator")
+                               + pack_hardware,
+        "claim_masses_for": ("batteryCellCasing", "batteryCellSeparator",
+                             "currentCollectorAnode", "currentCollectorCathode")
+                            + pack_hardware,
+        "mass_scale": {"currentCollectorAnode": {"Cu": 0.4764},
+                       "batteryPackCellTerminals": {"Cu": 0.4764}},
+        "note": note,
+    }
 
 
 @dataclass
@@ -1006,6 +1040,40 @@ class ExportParams:
         },
     })
 
+    # ⚠️ THE SODIUM-ION CELLS BUILT FROM LITERATURE, one entry per cathode family.
+    # Added 2026-10-02, beside `unknown_chemistry_template` and NOT in it: those
+    # two chemistries are the ones with no composition at all, and these have one
+    # -- a scenario, not a measurement. Same keys, same machinery for the
+    # packaging; what differs is that the cathode, anode and electrolyte are
+    # BUILT (`technology.sodium_cell`, `technology.sodium_cathode`,
+    # src/sodium_composition.py) instead of being left unknown.
+    #
+    # ⚠️ NEITHER IS A BILL OF MATERIALS. The source says in terms that no whole-
+    # cell breakdown of a commercial sodium-ion cell is public. What is here is
+    # an electrochemical mass balance on published capacities and voltages, with
+    # every uncertain input drawn. Mass it does not explain is carried as
+    # `batteryCellUnitemised`.
+    #
+    # The two names are file names: 04_04 in RAWCLICStockAndFlow reads
+    # `<name>_<kWh>kWh_<V>V_*.npy`. `Na_ion` is still written, unchanged, until
+    # 04_04 is switched over.
+    # SAFE TO CHANGE: the note freely; the claims only with the same reasoning
+    # as `unknown_chemistry_template["Na_ion"]`.
+    literature_chemistry_template: dict[str, dict] = field(default_factory=lambda: {
+        "Na_ion_layered": _sodium_packaging_template(
+            "layered-oxide sodium-ion, built from literature, a SCENARIO and not a bill "
+            "of materials: nickel-bearing O3 cathode, hard-carbon anode, NaPF6 in "
+            "carbonate; packaging assumed from LFP (Al replaces Cu on the anode "
+            "collector, x0.4764 for equal conductance); mass the electrochemistry does "
+            "not explain is batteryCellUnitemised"),
+        "Na_ion_prussian_white": _sodium_packaging_template(
+            "Prussian-white sodium-ion, built from literature, a SCENARIO and not a bill "
+            "of materials: ideal Na2Fe[Fe(CN)6] cathode with the sodium content drawn, "
+            "hard-carbon anode, NaPF6 in carbonate; packaging assumed from LFP (Al "
+            "replaces Cu on the anode collector, x0.4764 for equal conductance); mass "
+            "the electrochemistry does not explain is batteryCellUnitemised"),
+    })
+
 
 @dataclass
 class TechnologyParams:
@@ -1263,6 +1331,20 @@ class TechnologyParams:
             "years": (2020, 2070),
             "wh_per_kg": (200.0, 250.0),
         },
+        # The two sodium cells built from literature take Na_ion's trajectory:
+        # 200 Wh/kg, which has been seen in reports and presentations, rising 25%.
+        # It sets the structure scaling only; the cell mass of these two is drawn
+        # (technology.sodium_cell).
+        "Na_ion_layered": {
+            "basis": "cell",
+            "years": (2020, 2070),
+            "wh_per_kg": (200.0, 250.0),
+        },
+        "Na_ion_prussian_white": {
+            "basis": "cell",
+            "years": (2020, 2070),
+            "wh_per_kg": (200.0, 250.0),
+        },
     })
 
     # ⚠️ HOW MUCH THE INHERITED PACKAGING IS TRUSTED, for the two chemistries
@@ -1292,6 +1374,8 @@ class TechnologyParams:
         default_factory=lambda: {
             "Na_ion": {"min": 0.9, "mode": 1.0, "max": 1.3},
             "solid_state": {"min": 0.7, "mode": 0.8, "max": 1.1},
+            "Na_ion_layered": {"min": 0.9, "mode": 1.0, "max": 1.3},
+            "Na_ion_prussian_white": {"min": 0.9, "mode": 1.0, "max": 1.3},
         })
 
     # WHICH COMPONENTS THE FACTOR ABOVE MULTIPLIES: the cell packaging and the
@@ -1344,12 +1428,106 @@ class TechnologyParams:
         # range this project exports.
         # SAFE TO CHANGE: yes, and worth about 25% of pack mass at the extremes.
         "Na_ion": 0.650,
+        "Na_ion_layered": 0.650,
+        "Na_ion_prussian_white": 0.650,
     })
 
     # The chemistry whose pack mass today is the comparison for "material
     # reduced by a third".
     # SAFE TO CHANGE: yes.
     reference_chemistry: str = "battLiNMC_highNi"
+
+    # ⚠️ THE SODIUM-ION CELL, THE PARTS THE TWO CATHODE FAMILIES SHARE. Added
+    # 2026-10-02. Every entry is (min, mode, max) of a TRIANGULAR, drawn once per
+    # Monte Carlo draw and shared by every capacity, year and row -- one doubt
+    # about one technology. What they mean, and the model that uses them, is in
+    # src/sodium_composition.py; the source is documentation/
+    # Sodium_Ion_Battery_CATL_Investigation.md and its addendum.
+    #
+    # EACH ONE SAYS WHAT IT RESTS ON. SOURCED is in the report; MEASURED is read
+    # off the lithium workbook; ASSUMED is a judgement nobody has supplied a
+    # source for -- those four drive real uncertainty and are the first to
+    # replace.
+    #
+    #   energy_density_wh_per_kg   (160, 200, 220)   the CELL, base year.
+    #       min SOURCED: CATL's first-generation cell. mode SUPPLIED: 200, "seen
+    #       in reports and presentations" (CATL's Naxtra claim is 175, HiNa's
+    #       vehicle cell 140-165). max ASSUMED, 10% above the mode.
+    #       It sizes the UNITEMISED REMAINDER almost entirely.
+    #   anode_capacity_mah_per_g   (250, 300, 350)   hard carbon. SOURCED: the
+    #       report's "commonly 250-350", about 300 as the benchmark.
+    #   np_ratio                   (1.05, 1.10, 1.25) anode over cathode
+    #       capacity. ASSUMED.
+    #   anode_potential_v          (0.10, 0.20, 0.40) hard carbon vs Na, taken
+    #       off the cathode's voltage to give the cell's. ASSUMED -- the
+    #       addendum quotes the cathode against sodium, not the full cell.
+    #   electrolyte_kg_per_kwh     (0.285, 0.537, 0.67) min and mode MEASURED on
+    #       the lithium workbook (NMC high-Ni, LFP at 80 kWh). max ASSUMED: hard
+    #       carbon is porous and takes more.
+    #   salt_mass_fraction         (0.15, 0.161, 0.18) share of the electrolyte
+    #       that is salt. MEASURED on the lithium workbook across the seven
+    #       chemistries (LiPF6); the same fraction is taken for NaPF6.
+    #   salt_formula               NaPF6. The report: 1 M NaPF6 in carbonate is a
+    #       common reference formulation, NOT a CATL disclosure.
+    #   packaging_components       the components whose mass the template already
+    #       claims INSIDE the cell. Their draws are subtracted to leave the
+    #       remainder. The cell terminals are pack hardware and are not here.
+    # SAFE TO CHANGE: yes, and the ASSUMED ones should be, as soon as a source
+    # exists.
+    sodium_cell: dict = field(default_factory=lambda: {
+        "energy_density_wh_per_kg": (160.0, 200.0, 220.0),
+        "anode_capacity_mah_per_g": (250.0, 300.0, 350.0),
+        "np_ratio": (1.05, 1.10, 1.25),
+        "anode_potential_v": (0.10, 0.20, 0.40),
+        "electrolyte_kg_per_kwh": (0.285, 0.537, 0.67),
+        "salt_mass_fraction": (0.15, 0.161, 0.18),
+        "salt_formula": {"Na": 1, "P": 1, "F": 6},
+        "packaging_components": ("batteryCellCasing", "batteryCellSeparator",
+                                 "currentCollectorAnode", "currentCollectorCathode"),
+    })
+
+    # ⚠️ THE TWO SODIUM CATHODES. One entry per chemistry in
+    # `export.literature_chemistry_template`; the names must match.
+    #
+    #   capacity_mah_per_g, voltage_v   the cathode against sodium, (min, mode, max).
+    #   formula    each element's count per formula unit as (count at position 0,
+    #              count at position 1). The drawn `formula_position` moves the
+    #              formula linearly between the two, so one number is the whole
+    #              uncertainty about the composition.
+    #   formula_position   (min, mode, max) inside [0, 1].
+    #
+    # LAYERED OXIDE. Position 0 is NaCu1/9 Ni2/9 Fe1/3 Mn1/3 O2, the HiNa cell
+    # identified by a peer-reviewed post-mortem (report, Tier 1) -- the floor,
+    # and the mode. Position 1 is Na[Ni0.33 Mn0.33 Cu0.17 Fe0.17]O2, the
+    # composition in the sodium sheet (labelled CATL; the report calls that
+    # unsupported) and close to a lab O3 oxide in the report's reference list --
+    # so the TOP of the nickel range is weak. A nickel-free layered oxide (the
+    # addendum's HiNa formula, Tier 2-3) is NOT in this chemistry. The report says
+    # a Naxtra Ni/Mn/Cu/Fe ratio would be speculation, and it is. Capacity and
+    # voltage are the addendum's literature benchmarks, not company data.
+    #
+    # PRUSSIAN WHITE. The report gives NO formula, so position 1 is the IDEAL
+    # Na2Fe[Fe(CN)6] and position 0 a sodium-deficient Na1.5, which is what
+    # vacancies and water do to a real one; the mode is the ideal, "we have
+    # nothing else". Water is not modelled. Capacity spans the report's practical
+    # 100-150 (its middle, 125, is the minimum) and the addendum's 155-165.
+    # SAFE TO CHANGE: yes.
+    sodium_cathode: dict[str, dict] = field(default_factory=lambda: {
+        "Na_ion_layered": {
+            "capacity_mah_per_g": (140.0, 150.0, 160.0),
+            "voltage_v": (3.2, 3.3, 3.5),
+            "formula": {"Na": (1.0, 1.0), "Ni": (2 / 9, 0.33), "Cu": (1 / 9, 0.17),
+                        "Fe": (1 / 3, 0.17), "Mn": (1 / 3, 0.33), "O": (2.0, 2.0)},
+            "formula_position": (0.0, 0.0, 1.0),
+        },
+        "Na_ion_prussian_white": {
+            "capacity_mah_per_g": (125.0, 155.0, 165.0),
+            "voltage_v": (3.1, 3.3, 3.4),
+            "formula": {"Na": (1.5, 2.0), "Fe": (2.0, 2.0), "C": (6.0, 6.0),
+                        "N": (6.0, 6.0)},
+            "formula_position": (0.0, 1.0, 1.0),
+        },
+    })
 
 
 # ======================================================================
@@ -1684,10 +1862,12 @@ class Params:
             # real chemistries with real trajectories; this check exists to catch
             # a typo, not to insist on one vocabulary.
             if (chemistry not in sc.scenario_colours
-                    and chemistry not in sc.workbook_chemistry_colours):
+                    and chemistry not in sc.workbook_chemistry_colours
+                    and chemistry not in self.export.literature_chemistry_template):
                 raise ParameterError(
                     f"technology.chemistry_energy_density names {chemistry!r}, which "
-                    "is neither a scenario chemistry nor a workbook chemistry.")
+                    "is neither a scenario chemistry, a workbook chemistry nor a "
+                    "sodium cell built from literature.")
             missing = sorted({"basis", "years", "wh_per_kg"} - set(entry))
             if missing:
                 raise ParameterError(
@@ -1779,6 +1959,111 @@ class Params:
                     "export.unknown_chemistry_template entry, so no file could be "
                     "written for them at all -- add a template or set "
                     "export.write_unknown_chemistries = False.")
+
+        # ---- the sodium cells built from literature ---------------------------
+        from src.sodium_composition import ATOMIC_MASS
+        cell, cathodes = tech.sodium_cell, tech.sodium_cathode
+        literature = ex.literature_chemistry_template
+        if set(cathodes) != set(literature):
+            raise ParameterError(
+                "technology.sodium_cathode and export.literature_chemistry_template "
+                f"must name the same chemistries: {sorted(cathodes)} against "
+                f"{sorted(literature)}.")
+        clash = sorted(set(literature) & (set(ex.unknown_chemistry_template)
+                                          | set(sc.chemistries_without_composition)))
+        if clash:
+            raise ParameterError(
+                f"{clash} are built from literature AND listed as having no "
+                "composition. Pick one: a name in both would be written twice.")
+
+        def check_band(label: str, values, low_limit: float, high_limit=None) -> None:
+            try:
+                low, mode, high = (float(v) for v in values)
+            except (TypeError, ValueError):
+                raise ParameterError(
+                    f"{label} must be (min, mode, max): {values!r}") from None
+            if not low <= mode <= high:
+                raise ParameterError(
+                    f"{label} must satisfy min <= mode <= max: {low}, {mode}, {high}")
+            if low < low_limit or (high_limit is not None and high > high_limit):
+                raise ParameterError(
+                    f"{label} must lie within [{low_limit}, "
+                    f"{'inf' if high_limit is None else high_limit}]: {low}, {mode}, {high}")
+
+        missing = sorted({"energy_density_wh_per_kg", "anode_capacity_mah_per_g",
+                          "np_ratio", "anode_potential_v", "electrolyte_kg_per_kwh",
+                          "salt_mass_fraction", "salt_formula",
+                          "packaging_components"} - set(cell))
+        if missing:
+            raise ParameterError(f"technology.sodium_cell is missing {missing}.")
+        check_band("technology.sodium_cell['energy_density_wh_per_kg']",
+                   cell["energy_density_wh_per_kg"], 1.0)
+        check_band("technology.sodium_cell['anode_capacity_mah_per_g']",
+                   cell["anode_capacity_mah_per_g"], 1.0)
+        check_band("technology.sodium_cell['np_ratio']", cell["np_ratio"], 1.0)
+        check_band("technology.sodium_cell['anode_potential_v']",
+                   cell["anode_potential_v"], 0.0)
+        check_band("technology.sodium_cell['electrolyte_kg_per_kwh']",
+                   cell["electrolyte_kg_per_kwh"], 0.0)
+        check_band("technology.sodium_cell['salt_mass_fraction']",
+                   cell["salt_mass_fraction"], 0.0, 1.0)
+        unknown_salt = sorted(set(cell["salt_formula"]) - set(ATOMIC_MASS))
+        if unknown_salt or any(n <= 0 for n in cell["salt_formula"].values()):
+            raise ParameterError(
+                "technology.sodium_cell['salt_formula'] needs known elements with "
+                f"positive counts: {cell['salt_formula']} (unknown: {unknown_salt}).")
+
+        for chemistry, spec in cathodes.items():
+            where = f"technology.sodium_cathode[{chemistry!r}]"
+            missing = sorted({"capacity_mah_per_g", "voltage_v", "formula",
+                              "formula_position"} - set(spec))
+            if missing:
+                raise ParameterError(f"{where} is missing {missing}.")
+            check_band(f"{where}['capacity_mah_per_g']", spec["capacity_mah_per_g"], 1.0)
+            check_band(f"{where}['voltage_v']", spec["voltage_v"], 0.0)
+            check_band(f"{where}['formula_position']", spec["formula_position"], 0.0, 1.0)
+            if float(spec["voltage_v"][0]) <= float(cell["anode_potential_v"][2]):
+                raise ParameterError(
+                    f"{where}: the lowest cathode voltage {spec['voltage_v'][0]} V is "
+                    f"not above the highest anode potential "
+                    f"{cell['anode_potential_v'][2]} V, so a draw could give the cell "
+                    "no voltage at all.")
+            bad = sorted(set(spec["formula"]) - set(ATOMIC_MASS))
+            if bad or not spec["formula"]:
+                raise ParameterError(f"{where}['formula'] names unknown elements {bad}.")
+            for element, ends in spec["formula"].items():
+                if len(ends) != 2 or min(ends) < 0 or max(ends) <= 0:
+                    raise ParameterError(
+                        f"{where}['formula'][{element!r}] must be two counts "
+                        f"(at position 0, at position 1), none negative: {ends}")
+            for need, label in ((tech.chemistry_energy_density, "chemistry_energy_density"),
+                                (tech.cell_to_pack_ratio, "cell_to_pack_ratio"),
+                                (tech.unknown_chemistry_mass_scale,
+                                 "unknown_chemistry_mass_scale")):
+                if chemistry not in need:
+                    raise ParameterError(
+                        f"{chemistry!r} is built from literature but "
+                        f"technology.{label} has no entry for it.")
+        for chemistry, template in literature.items():
+            missing_keys = sorted({"based_on", "remove_components", "element_swaps",
+                                   "assert_elements_for", "claim_masses_for",
+                                   "mass_scale", "note"} - set(template))
+            if missing_keys:
+                raise ParameterError(
+                    f"export.literature_chemistry_template[{chemistry!r}] is missing "
+                    f"{missing_keys}.")
+        outside = sorted(set(cell["packaging_components"])
+                         - set(next(iter(literature.values()))["claim_masses_for"]))
+        if outside:
+            raise ParameterError(
+                f"technology.sodium_cell['packaging_components'] names {outside}, which "
+                "the template does not claim a mass for -- there would be nothing to "
+                "subtract.")
+        if not self.monte_carlo.enabled:
+            raise ParameterError(
+                "the sodium cells built from literature exist only as draws; "
+                "monte_carlo.enabled must be True while "
+                "technology.sodium_cathode names any.")
         if not sc.scenario_file_name.endswith(".png"):
             raise ParameterError(
                 f"scenarios.scenario_file_name must end in '.png': {sc.scenario_file_name!r}")

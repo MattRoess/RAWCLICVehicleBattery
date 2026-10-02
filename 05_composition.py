@@ -37,11 +37,20 @@ mass. Both levels are written so the gap is visible rather than inferred.
 PACKAGING is claimed; the cathode, anode and electrolyte are written as
 unknownBatteryMaterial. What may be claimed about them, and why, is in
 `export.unknown_chemistry_template`.
+
+⚠️ TWO SODIUM-ION CELLS ARE BUILT FROM LITERATURE (2026-10-02), `Na_ion_layered`
+and `Na_ion_prussian_white`: layered oxide and Prussian white, written beside
+`Na_ion`, which is unchanged. Their packaging is claimed exactly as sodium's is;
+their cathode, anode and electrolyte are an electrochemical mass balance with
+every input drawn (src/sodium_composition.py), and the mass that balance does not
+explain is its own component, `batteryCellUnitemised`. A scenario, not a bill of
+materials -- the source says none is public.
 """
 
 from __future__ import annotations
 
 import sys
+import zlib
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent
@@ -58,6 +67,7 @@ import pandas as pd  # noqa: E402
 
 from src.composition import (CompositionError, CompositionModel,  # noqa: E402
                              approximate_mode)
+from src import sodium_composition as sodium  # noqa: E402
 from src.params_schema import ParameterError, current  # noqa: E402
 
 LAST_OBSERVED_YEAR = 2026
@@ -414,7 +424,13 @@ def unknown_scale_draws(params, chemistry: str) -> np.ndarray | None:
         return _UNKNOWN_SCALE_DRAWS[chemistry]
     mc = params.monte_carlo
     # +2: neither the workbook's stream (+0) nor the improvement's (+1).
-    seed = mc.random_seed + 2 + (abs(hash(chemistry)) % 1000)
+    # crc32, NOT hash(): Python randomises string hashes per process, so a seed
+    # built from hash() changed between runs -- measured 19, 697 and 922 for
+    # 'Na_ion' in three processes -- and the packaging-trust draws with it. The
+    # same settings gave different files. Fixed 2026-10-02; the draws of Na_ion
+    # and solid_state are therefore different from every run before this date,
+    # and from now on identical from one run to the next.
+    seed = mc.random_seed + 2 + (zlib.crc32(chemistry.encode()) % 1000)
     rng = np.random.default_rng(seed)
     _UNKNOWN_SCALE_DRAWS[chemistry] = rng.triangular(
         float(band["min"]), float(band["mode"]), float(band["max"]), size=mc.n_draws)
@@ -439,7 +455,7 @@ def unknown_scaled_statistics(model: CompositionModel, params, chemistry: str,
     the template's deterministic factors, the year's improvement and the trust
     factor, and their statistics are taken from the result.
     """
-    template = params.export.unknown_chemistry_template[chemistry]
+    template = unknown_template(params, chemistry)
     scale = unknown_scale_draws(params, chemistry)
     if scale is None:
         return pd.DataFrame()
@@ -514,6 +530,173 @@ def unknown_scaled_statistics(model: CompositionModel, params, chemistry: str,
     return pd.DataFrame(out)
 
 
+def unknown_template(params, chemistry: str) -> dict:
+    """
+    The template of a chemistry that is not in the workbook: one of the two with
+    no composition, or one of the sodium cells built from literature. Both carry
+    the same keys, so everything that claims packaging reads them alike.
+    """
+    export = params.export
+    if chemistry in export.unknown_chemistry_template:
+        return export.unknown_chemistry_template[chemistry]
+    return export.literature_chemistry_template[chemistry]
+
+
+_SODIUM_CACHE: dict = {}
+_SODIUM_VERIFIED: set = set()
+
+
+def lithium_cathode_range(model: CompositionModel, params,
+                          capacity: float = 80.0) -> tuple[float, float]:
+    """
+    The lowest and highest cathode energy per gram among the workbook's
+    chemistries, MEASURED NOW from the workbook rather than written down: the
+    anchor the sodium cathode is checked against, so it follows the workbook if
+    the workbook changes.
+    """
+    key = ("lithium range", float(capacity))
+    if key not in _SODIUM_CACHE:
+        per_gram = []
+        for chemistry in sorted(set(model._series.keys.chemistry)
+                                - {params.scope.pack_level_key}):
+            table = model.weights_at(capacity, chemistry=chemistry, level="component")
+            mass = float(table.loc[table.component == sodium.CATHODE, "mass_kg"].sum())
+            if mass > 0:
+                per_gram.append(capacity / mass)        # kWh / kg == Wh / g
+        _SODIUM_CACHE[key] = (min(per_gram), max(per_gram))
+    return _SODIUM_CACHE[key]
+
+
+def sodium_packaging(model: CompositionModel, params, chemistry: str,
+                     capacity: float) -> np.ndarray:
+    """
+    What the claimed casing, separator and collectors weigh in each draw, kg.
+
+    Taken from the SAME packaging draws the arrays carry -- template factors,
+    conductance scaling and trust factor included -- so the remainder is the
+    cell minus exactly what is already counted.
+    """
+    key = ("packaging", chemistry, round(float(capacity), 6))
+    if key not in _SODIUM_CACHE:
+        keys, draws = unknown_packaging_draws(model, params, chemistry, capacity)
+        named = params.technology.sodium_cell["packaging_components"]
+        rows = ((keys.code == params.scope.component_parameter_code)
+                & keys.component.isin(named)).to_numpy()
+        if int(rows.sum()) != len(named):
+            raise sodium.SodiumCompositionError(
+                f"{chemistry}: expected one component-level row for each of {named}, "
+                f"found {int(rows.sum())}.")
+        _SODIUM_CACHE[key] = draws[rows].sum(axis=0)
+    return _SODIUM_CACHE[key]
+
+
+def sodium_inputs(model: CompositionModel, params, chemistry: str) -> sodium.Inputs:
+    """
+    The sodium cell's inputs, drawn ONCE per chemistry and shared by every
+    capacity, year and row, conditioned so no anchor has a negative remainder.
+    """
+    key = ("inputs", chemistry)
+    if key not in _SODIUM_CACHE:
+        anchors = [float(c) for c in model._series.capacities]
+        packaging = {a: sodium_packaging(model, params, chemistry, a) for a in anchors}
+        inputs, report = sodium.conditioned_inputs(
+            params, chemistry, params.monte_carlo.n_draws, packaging)
+        worst = max(report["shift"].items(), key=lambda item: abs(item[1]))
+        print(f"    [{chemistry}] sodium cell drawn: {100 * report['redrawn']:.2f}% of "
+              f"draws redrawn for a negative remainder across {len(anchors)} anchors; "
+              f"conditioning moved {worst[0]} by {100 * worst[1]:+.2f}% at most")
+        _SODIUM_CACHE[key] = inputs
+    return _SODIUM_CACHE[key]
+
+
+def sodium_masses(model: CompositionModel, params, chemistry: str,
+                  capacity: float) -> sodium.Masses:
+    """
+    The cell of one battery at `capacity`, base year, checked the first time it
+    is made at that capacity. Both output paths call this and nothing else, so
+    they cannot disagree about what the cell weighs.
+    """
+    masses = sodium.masses_at(params, chemistry, sodium_inputs(model, params, chemistry),
+                              capacity, sodium_packaging(model, params, chemistry, capacity))
+    marker = (chemistry, round(float(capacity), 6))
+    if marker not in _SODIUM_VERIFIED:
+        sodium.verify(params, chemistry, masses, capacity,
+                      sodium_packaging(model, params, chemistry, capacity),
+                      lithium_cathode_range(model, params))
+        _SODIUM_VERIFIED.add(marker)
+    return masses
+
+
+def sodium_wholes(masses: sodium.Masses) -> dict:
+    """The four components the sodium cell owns, by name."""
+    return {sodium.CATHODE: masses.cathode, sodium.ANODE: masses.anode,
+            sodium.ELECTROLYTE: masses.electrolyte, sodium.REMAINDER: masses.remainder}
+
+
+def fill_sodium_cell(model: CompositionModel, params, chemistry: str,
+                     rows: pd.DataFrame, real_capacities: pd.Series) -> pd.DataFrame:
+    """
+    Replace the unknown cathode, anode and electrolyte rows with the cell built
+    from literature, and add the unitemised remainder.
+
+    STATISTICS COME FROM DRAWS: each row is the base-year draws times the year's
+    improvement draws, and its mean, percentiles, mode and spread are read off
+    that. Value, the central, is every input at its mode, times the improvement's
+    mode -- the convention every other chemistry uses -- with the remainder
+    closing that central against the packaging the rows already carry.
+    """
+    mc = params.monte_carlo
+    named = set(params.technology.sodium_cell["packaging_components"])
+    note = unknown_template(params, chemistry)["note"]
+    central_inputs = sodium.mode_inputs(params, chemistry)
+    lower, upper = f"mass_p{mc.lower_percentile:g}", f"mass_p{mc.upper_percentile:g}"
+    kept = rows[~rows.component.isin(sodium.ACTIVE_COMPONENTS)]
+
+    built = []
+    for (segment, year), group in kept.groupby(["segment", "year"], dropna=False):
+        capacity = float(real_capacities.loc[(segment, year)])
+        masses = sodium_masses(model, params, chemistry, capacity)
+        year_draws = improvement_factor_draws(params, float(year))
+        factor = improvement_factor(params, float(year))
+        packaging_now = float(group.loc[(group.level == "component")
+                                        & group.component.isin(named), "mass_kg"].sum())
+        centre = sodium.masses_at(params, chemistry, central_inputs, capacity,
+                                  np.array([packaging_now / factor]))
+
+        specs = []          # (level, component, element, base-year draws, central kg)
+        for component, whole in sodium_wholes(masses).items():
+            specs.append(("component", component, np.nan, whole,
+                          float(sodium_wholes(centre)[component][0]) * factor))
+            for element, kg in masses.elements.get(component, {}).items():
+                specs.append(("element", component, element, kg,
+                              float(centre.elements[component][element][0]) * factor))
+        block = np.vstack([spec[3] for spec in specs]) * np.asarray(year_draws)[None, :]
+        quartiles = np.percentile(block, [25, 50, 75], axis=1)
+        stats = {
+            lower: np.percentile(block, mc.lower_percentile, axis=1),
+            upper: np.percentile(block, mc.upper_percentile, axis=1),
+            "mass_mean": block.mean(axis=1), "mass_mode": approximate_mode(block),
+            "mass_median": quartiles[1], "mass_std": block.std(axis=1, ddof=1),
+            "mass_min": block.min(axis=1), "mass_max": block.max(axis=1),
+            "mass_p25": quartiles[0], "mass_p75": quartiles[2],
+        }
+        prototype = group.iloc[0].to_dict()
+        for position, (level, component, element, _, central) in enumerate(specs):
+            record = dict(prototype)
+            record.update(
+                level=level, component=component, element=element, branch="cell",
+                mass_kg=central, kg_per_kwh=central / capacity, material=pd.NA,
+                composition_status=("unitemised_cell_mass"
+                                    if component == sodium.REMAINDER
+                                    else "literature_scenario"),
+                note=note)
+            for name, values in stats.items():
+                if name in rows.columns:
+                    record[name] = float(values[position])
+            built.append(record)
+    return pd.concat([kept, pd.DataFrame(built)[list(rows.columns)]], ignore_index=True)
+
+
 def build_unknown_rows(model: CompositionModel, params, capacities: pd.DataFrame,
                        chemistry: str) -> pd.DataFrame:
     """
@@ -523,7 +706,7 @@ def build_unknown_rows(model: CompositionModel, params, capacities: pd.DataFrame
     reader gets a row it cannot mistake for data and cannot silently skip --
     not that it gets a plausible-looking guess.
     """
-    template = params.export.unknown_chemistry_template[chemistry]
+    template = unknown_template(params, chemistry)
     base = template["based_on"]
 
     # Build the skeleton at a capacity the composition model will answer for.
@@ -695,6 +878,12 @@ def build_unknown_rows(model: CompositionModel, params, capacities: pd.DataFrame
     # and anode a sodium cell holds, taken from LFP. Nothing here knows that.
     # Only the four chemistry-independent pack components carry a mass; the rest
     # stays unknownBatteryMaterial with no number attached.
+
+    # THE SODIUM CELLS BUILT FROM LITERATURE are the exception to everything the
+    # comments above say about active materials: theirs are filled here, from
+    # draws, and the remainder is a row of its own.
+    if sodium.is_sodium_cell(params, chemistry):
+        rows = fill_sodium_cell(model, params, chemistry, rows, real_capacities)
 
     return rows
 
@@ -1008,9 +1197,12 @@ def check_draws_match_workbook(model: CompositionModel, params, chemistry: str,
                         "through the pack rules have drifted.")
 
 
-def unknown_template_draws(model: CompositionModel, params, chemistry: str,
-                           capacity: float) -> tuple[pd.DataFrame, np.ndarray]:
+def unknown_packaging_draws(model: CompositionModel, params, chemistry: str,
+                            capacity: float) -> tuple[pd.DataFrame, np.ndarray]:
     """
+    THE PACKAGING HALF of `unknown_template_draws`: everything the template
+    claims, with the cathode, anode and electrolyte at ZERO.
+
     (keys, masses) for a chemistry with no composition of its own, in the shape
     `component_element_draws_at(code=None)` returns and ready for the pack rules.
 
@@ -1030,7 +1222,7 @@ def unknown_template_draws(model: CompositionModel, params, chemistry: str,
     risk this project has been bitten by three times.
     `check_unknown_draws_match_workbook()` compares them on every run.
     """
-    template = params.export.unknown_chemistry_template[chemistry]
+    template = unknown_template(params, chemistry)
     keys, draws = model.component_element_draws_at(
         capacity, chemistry=template["based_on"], code=None)
     keys = keys.copy()
@@ -1087,6 +1279,38 @@ def unknown_template_draws(model: CompositionModel, params, chemistry: str,
     return keys, draws
 
 
+def unknown_template_draws(model: CompositionModel, params, chemistry: str,
+                           capacity: float) -> tuple[pd.DataFrame, np.ndarray]:
+    """
+    (keys, masses) for a chemistry that is not in the workbook, ready for the
+    pack rules.
+
+    The two with no composition are the packaging alone. A sodium cell built
+    from literature has its cathode, anode and electrolyte replaced by the draws
+    of `sodium_masses`, element by element, and the unitemised remainder added as
+    a component of its own.
+    """
+    keys, draws = unknown_packaging_draws(model, params, chemistry, capacity)
+    if not sodium.is_sodium_cell(params, chemistry):
+        return keys, draws
+
+    masses = sodium_masses(model, params, chemistry, capacity)
+    scope = params.scope
+    drop = keys.component.isin(sodium.ACTIVE_COMPONENTS).to_numpy()
+    keys, draws = keys[~drop].reset_index(drop=True), draws[~drop]
+    added_keys, added_draws = [], []
+    for component, whole in sodium_wholes(masses).items():
+        added_keys.append({"chemistry": chemistry, "component": component,
+                           "element": "n/a", "code": scope.component_parameter_code})
+        added_draws.append(whole)
+        for element, kg in masses.elements.get(component, {}).items():
+            added_keys.append({"chemistry": chemistry, "component": component,
+                               "element": element, "code": scope.element_parameter_code})
+            added_draws.append(kg)
+    return (pd.concat([keys, pd.DataFrame(added_keys)], ignore_index=True),
+            np.vstack([draws] + [row[None, :] for row in added_draws]))
+
+
 def check_unknown_draws_match_workbook(model: CompositionModel, params,
                                        chemistry: str, capacity: float,
                                        tolerance: float = 0.005) -> None:
@@ -1100,10 +1324,10 @@ def check_unknown_draws_match_workbook(model: CompositionModel, params,
     ONE CORRECTION IS NEEDED AND IT IS NOT A FUDGE. `build_unknown_rows` writes
     the packaging trust's MODE into the central column, by the same convention
     every other chemistry uses for the improvement. The draws carry the factor
-    itself, whose MEAN is (min + mode + max) / 3 -- 1.0667 against a mode of 1.0
-    for sodium, 0.8667 against 0.8 for solid-state. So the row is compared
-    against the draws divided by mean/mode, on the components the trust applies
-    to. Everything else is deterministic on both sides and compared as it is.
+    itself, whose mean is about 1.0667 against a mode of 1.0 for sodium and
+    0.8667 against 0.8 for solid-state. So the row is compared against the draws
+    divided by the REALISED mean over the mode of the draws being compared, on
+    the components the trust applies to. Everything else is deterministic on both sides and compared as it is.
     """
     keys, raw = unknown_template_draws(model, params, chemistry, capacity)
     per_voltage = apply_pack_rules_to_draws(keys, raw, params, chemistry)
@@ -1116,20 +1340,53 @@ def check_unknown_draws_match_workbook(model: CompositionModel, params,
 
     band = params.technology.unknown_chemistry_mass_scale.get(chemistry)
     drawn_over_central = 1.0
-    if band is not None:
-        drawn_over_central = ((float(band["min"]) + float(band["mode"])
-                               + float(band["max"])) / 3.0) / float(band["mode"])
+    scale = unknown_scale_draws(params, chemistry)
+    if scale is not None:
+        # THE REALISED MEAN of the factor's draws over the mode, NOT the analytic
+        # (min + mode + max) / 3 over the mode. They differ by the Monte Carlo
+        # error -- 0.46% at 2,000 draws for Na_ion_layered, 2.6 standard errors --
+        # and dividing by the analytic one blamed that sampling noise on the two
+        # paths. It also made this check pass or fail between runs at low draw
+        # counts, while the seed was randomised per process (fixed 2026-10-02).
+        drawn_over_central = float(np.mean(scale)) / float(band["mode"])
     in_scope = set(params.technology.unknown_chemistry_scaled_components)
+    # A sodium cell built from literature owns its three active components and
+    # the remainder. Both paths make them from the SAME draws, so they are
+    # compared on the MEAN of those draws -- not on Value, which is every input at
+    # its mode and is a different number for a nonlinear model.
+    owned = (set(sodium.ACTIVE_COMPONENTS) | {sodium.REMAINDER}
+             if sodium.is_sodium_cell(params, chemistry) else set())
 
     for voltage, drawn in per_voltage.items():
         here = rows[rows["voltage_v"] == voltage]
         book = (here[here.level == "component"]
                 .groupby("component")["mass_kg"].sum())
+        book_mean = (here[here.level == "component"]
+                     .groupby("component")["mass_mean"].sum())
+        if owned:
+            book_pairs = (here[here.level == "element"]
+                          .groupby(["component", "element"])["mass_mean"].sum())
+            for pair, values in zip(drawn.pairs, drawn.pair_masses):
+                element_name, component_name = pair.split("|", 1)
+                if component_name not in owned:
+                    continue
+                expected = float(book_pairs.get((component_name, element_name), 0.0))
+                got = float(values.mean())
+                off = abs(got - expected) / max(expected, 1e-9)
+                if off > tolerance:
+                    raise SystemExit(
+                        f"{chemistry} {capacity:.0f}kWh {voltage}V {element_name} in "
+                        f"{component_name}: draws give {got:.4f} kg against the "
+                        f"rows' {expected:.4f} kg, {off:.2%} apart.")
         for name, values in zip(drawn.components, drawn.component_masses):
-            expected = float(book.get(name, 0.0))
-            got = float(values.mean())
-            if name in in_scope:
-                got /= drawn_over_central
+            if name in owned:
+                expected = float(book_mean.get(name, 0.0))
+                got = float(values.mean())
+            else:
+                expected = float(book.get(name, 0.0))
+                got = float(values.mean())
+                if name in in_scope:
+                    got /= drawn_over_central
             if expected <= 0 and got <= 0:
                 continue
             off = abs(got - expected) / max(expected, 1e-9)
@@ -1165,8 +1422,34 @@ def fixed_capacity_rows(model: CompositionModel, params, chemistry: str,
     return apply_pack_rules(builder(model, params, held, chemistry), params, chemistry)
 
 
+def element_total_band(model: CompositionModel, params, chemistry: str,
+                       capacity: float) -> pd.DataFrame:
+    """
+    The 2.5 and 97.5 percentiles of the SUM of a chemistry's elements, by year,
+    taken from the draws.
+
+    `draw_chemistry` ordinarily adds the elements' own percentiles, which is exact
+    when every element moves on the same draw -- the workbook's chemistries do --
+    and wrong when the elements come from independent inputs, as a sodium cell
+    built from literature does: the 97.5th percentile of a sum is not the sum of
+    the 97.5th percentiles, and the band would come out too wide.
+    """
+    keys, raw = unknown_template_draws(model, params, chemistry, capacity)
+    voltage = params.export.over_time_figure_voltage_v
+    total = apply_pack_rules_to_draws(keys, raw, params, chemistry)[voltage
+                                                                    ].element_masses.sum(axis=0)
+    mc = params.monte_carlo
+    rows = {}
+    for year in params.export_years():
+        in_year = total * np.asarray(improvement_factor_draws(params, float(year)))
+        rows[year] = [np.percentile(in_year, mc.lower_percentile),
+                      np.percentile(in_year, mc.upper_percentile)]
+    return pd.DataFrame(rows, index=["mass_p2.5", "mass_p97.5"]).T
+
+
 def draw_chemistry(rows: pd.DataFrame, chemistry: str, segment: str, params,
-                   top_anchor_kwh: float = 100.0):
+                   top_anchor_kwh: float = 100.0,
+                   total_band: pd.DataFrame | None = None):
     """Every element of one chemistry, stacked, across the years."""
     wanted = rows[(rows.chemistry == chemistry) & (rows.segment == segment)
                   & (rows.element != UNKNOWN_MATERIAL)]
@@ -1190,7 +1473,8 @@ def draw_chemistry(rows: pd.DataFrame, chemistry: str, segment: str, params,
     # The total's band is summed ON THE DRAWS -- the 97.5th percentile of a sum
     # is not the sum of the 97.5th percentiles -- and the CRM figures carry the
     # per-element bands at a scale where they can actually be read.
-    band = (wanted.groupby("year")[["mass_p2.5", "mass_p97.5"]]
+    band = (total_band.reindex(total.index) if total_band is not None else
+            wanted.groupby("year")[["mass_p2.5", "mass_p97.5"]]
             .sum(min_count=1).reindex(total.index))
     if band["mass_p2.5"].notna().any():
         axes.fill_between(total.index, band["mass_p2.5"], band["mass_p97.5"],
@@ -1198,6 +1482,7 @@ def draw_chemistry(rows: pd.DataFrame, chemistry: str, segment: str, params,
                           label="total, 2.5-97.5 percentile")
 
     unknown = chemistry in UNKNOWN_COMPOSITION
+    literature = sodium.is_sodium_cell(params, chemistry)
     axes.set_xlabel("year", fontsize=11)
     axes.set_ylabel("mass in one car [kg]", fontsize=11)
     # 'segment' carries the capacity label for the held-capacity figures. Above
@@ -1216,7 +1501,9 @@ def draw_chemistry(rows: pd.DataFrame, chemistry: str, segment: str, params,
         f"{chemistry} — every element, {where}, 2020-2070"
         + ("\nPACKAGING ONLY: the cathode, anode and electrolyte are not known "
            "for this chemistry" if unknown else
-           f"\ntotal falls {100 * (1 - total.iloc[-1] / total.max()):.0f}% as the "
+           ("\nBUILT FROM LITERATURE: a scenario, not a bill of materials; the "
+            "unitemised cell mass is not drawn" if literature else "")
+           + f"\ntotal falls {100 * (1 - total.iloc[-1] / total.max()):.0f}% as the "
            "cells improve — same kWh, less material")
         + beyond,
         fontsize=12.5)
@@ -1276,11 +1563,20 @@ def collect_draws(model: CompositionModel, params, capacity: float, element: str
                    - {params.scope.pack_level_key})
     year = float(params.export.distribution_figure_year)
     year_draws = improvement_factor_draws(params, year)
+    sources = []
     for chemistry in known:
         try:
-            elements, masses = model.element_draws_at(capacity, chemistry=chemistry)
+            sources.append((chemistry,) + tuple(
+                model.element_draws_at(capacity, chemistry=chemistry)))
         except CompositionError:
             continue
+    # THE SODIUM CELLS BUILT FROM LITERATURE, each its own line. They are not in
+    # the workbook, so the loop above never saw them, and the nickel, copper and
+    # manganese figures said nothing about the chemistries that put nickel back.
+    for chemistry in sorted(params.export.literature_chemistry_template):
+        sources.append((chemistry,) + sodium_element_draws(
+            model, params, chemistry, capacity))
+    for chemistry, elements, masses in sources:
         if year_draws is not None:
             masses = masses * np.asarray(year_draws)[None, :]
         if element is None:
@@ -1294,6 +1590,26 @@ def collect_draws(model: CompositionModel, params, capacity: float, element: str
         out[chemistry] = row
     return out
 
+
+
+def sodium_element_draws(model: CompositionModel, params, chemistry: str,
+                         capacity: float) -> tuple[list[str], np.ndarray]:
+    """
+    Every element of a sodium cell built from literature, summed across its
+    components, as (elements, masses) with masses (n_elements, n_draws) in kg --
+    the shape `element_draws_at` returns for a workbook chemistry, so the
+    distribution figures treat the two alike. Base year; the caller applies the
+    year's improvement.
+    """
+    keys, draws = unknown_template_draws(model, params, chemistry, capacity)
+    at_element = (keys.code == params.scope.element_parameter_code).to_numpy()
+    subset = keys[at_element].reset_index(drop=True)
+    masses = draws[at_element]
+    elements, rows = [], []
+    for element, positions in subset.groupby("element").indices.items():
+        elements.append(str(element))
+        rows.append(masses[positions].sum(axis=0))
+    return elements, np.vstack(rows)
 
 
 def shared_pack_draws(model: CompositionModel, params, capacity: float
@@ -1341,7 +1657,8 @@ def draw_distribution(series: dict[str, np.ndarray], title: str, xlabel: str,
         row = series[chemistry]
         colour = (colours or params.scenarios.workbook_chemistry_colours)[chemistry]
         curve = histogram_density(row, grid)
-        style = "--" if chemistry in UNKNOWN_COMPOSITION else "-"
+        style = ("--" if chemistry in UNKNOWN_COMPOSITION
+                 or sodium.is_sodium_cell(params, chemistry) else "-")
         axes.fill_between(grid, 0, curve, color=colour, alpha=0.22, linewidth=0)
         axes.plot(grid, curve, color=colour, linewidth=2.0, linestyle=style,
                   label=chemistry)
@@ -1366,6 +1683,70 @@ def draw_distribution(series: dict[str, np.ndarray], title: str, xlabel: str,
     return figure
 
 
+def literature_note(series: dict, params) -> str:
+    """
+    The line that explains the dashed curves -- and ONLY when there are any. A
+    note about a sodium cell on a figure that has none (lithium, cobalt, silicon)
+    would describe something the reader cannot see.
+    """
+    if any(sodium.is_sodium_cell(params, chemistry) for chemistry in series):
+        return ("\ndashed: a sodium cell built from literature, a scenario and not "
+                "a bill of materials")
+    return ""
+
+
+def draw_element_panels(chemistry: str, elements: list[str], masses: np.ndarray,
+                        params, capacity: float):
+    """
+    EVERY ELEMENT OF ONE CHEMISTRY, each with its own distribution, on its own
+    scale.
+
+    The stacked figure can carry one band, on the total, because iron is 600x
+    lithium and on a shared axis the small ones vanish. Here each element has a
+    panel, so the nickel, copper and manganese a sodium cell puts back can be read
+    with their bands: the line is the mode, the dotted pair the 2.5 and 97.5
+    percentiles, and the panel title the mean with that interval. Heaviest first.
+    """
+    columns = 5
+    rows = -(-len(elements) // columns)
+    figure, axes = plt.subplots(rows, columns, figsize=(3.2 * columns, 2.7 * rows + 1.5),
+                                squeeze=False)
+    colour = params.scenarios.workbook_chemistry_colours[chemistry]
+    for slot, index in enumerate(np.argsort(-masses.mean(axis=1))):
+        axis = axes[slot // columns][slot % columns]
+        row = masses[index]
+        low, high = np.percentile(row, [0.2, 99.8])
+        pad = 0.10 * (high - low) or 0.10 * abs(low) or 1.0
+        grid = np.linspace(low - pad, high + pad, 300)
+        curve = histogram_density(row, grid)
+        axis.fill_between(grid, 0, curve, color=colour, alpha=0.30, linewidth=0)
+        axis.plot(grid, curve, color=colour, linewidth=1.8)
+        mode = float(approximate_mode(row[None, :])[0])
+        axis.plot([mode, mode], [0, 1.02], color=colour, linewidth=1.4)
+        edges = np.percentile(row, [2.5, 97.5])
+        for edge in edges:
+            axis.plot([edge, edge], [0, 0.30], color=colour, linewidth=1.0,
+                      linestyle=":")
+        axis.set_title(f"{elements[index]}   {row.mean():.1f} kg  "
+                       f"[{edges[0]:.1f}, {edges[1]:.1f}]", fontsize=10)
+        axis.set_ylim(0, 1.16)
+        axis.set_yticks([])
+        axis.tick_params(labelsize=8)
+        for side in ("top", "right", "left"):
+            axis.spines[side].set_visible(False)
+    for slot in range(len(elements), rows * columns):
+        axes[slot // columns][slot % columns].axis("off")
+    figure.suptitle(
+        f"{chemistry} \u2014 every element of one {capacity:.0f} kWh battery in "
+        f"{params.export.distribution_figure_year}\n"
+        f"{params.monte_carlo.n_draws:,} draws; line the mode, dotted the 2.5 and "
+        "97.5 percentiles; each panel on its own scale\n"
+        "BUILT FROM LITERATURE: a scenario, not a bill of materials",
+        fontsize=11.5)
+    figure.tight_layout(rect=[0, 0, 1, 0.90])
+    return figure
+
+
 def main(argv: list[str] | None = None) -> int:
     try:
         params = current()
@@ -1387,6 +1768,7 @@ def main(argv: list[str] | None = None) -> int:
 
     chemistries = sorted(set(model._series.keys.chemistry) - {params.scope.pack_level_key})
     missing = list(params.scenarios.chemistries_without_composition)
+    literature = sorted(params.export.literature_chemistry_template)
 
     print(f"Export years: {params.export_years()}")
     print("Capacity    : the workbook's own anchors "
@@ -1400,10 +1782,14 @@ def main(argv: list[str] | None = None) -> int:
               "only, active materials left empty.")
     else:
         print(f"NOT written : {missing} (export.write_unknown_chemistries is off).")
+    print(f"              {len(literature)} sodium cells built from literature -- "
+          f"{literature}: packaging claimed, cell drawn from an electrochemical mass "
+          "balance.")
 
     to_write = [(c, False) for c in chemistries]
     if export.write_unknown_chemistries:
         to_write += [(c, True) for c in missing]
+    to_write += [(c, True) for c in literature]
 
     # -----------------------------------------------------------------------
     # Per-draw element FRACTIONS, at the workbook's own capacity anchors.
@@ -1473,7 +1859,7 @@ def main(argv: list[str] | None = None) -> int:
     # model._series -- they are built from a base chemistry by
     # export.unknown_chemistry_template. Leaving them out would have shipped
     # seven files where nine were asked for.
-    unknown = sorted(params.export.unknown_chemistry_template)
+    unknown = sorted(params.export.unknown_chemistry_template) + literature
 
     print(f"{params.monte_carlo.n_draws:,} draws | anchors {[int(a) for a in anchors]} "
           f"| years {years[0]}-{years[-1]} step {params.export.export_year_step} "
@@ -1566,6 +1952,7 @@ def main(argv: list[str] | None = None) -> int:
     # dropped again below.
     # ---------------------------------------------------------------------
     n_unknown_draw_files = 0
+    n_literature_draw_files = 0
     for chemistry in unknown:
         capacities = pd.DataFrame([
             {"segment": f"{int(a)}kWh", "year": y, "capacity_kwh_nominal": a,
@@ -1641,9 +2028,14 @@ def main(argv: list[str] | None = None) -> int:
                 (directory / f"{stem}_pairs.txt").write_text(
                     "\n".join(drawn.pairs))
                 n_unknown_draw_files += 3
-    print(f"  wrote {n_unknown_draw_files} per-draw arrays for the chemistries "
-          "with no composition of their own -- packaging only, active materials "
-          "zero")
+                if chemistry in literature:
+                    n_literature_draw_files += 3
+    print(f"  wrote {n_unknown_draw_files - n_literature_draw_files} per-draw arrays "
+          "for the chemistries with no composition of their own -- packaging only, "
+          "active materials zero")
+    print(f"  wrote {n_literature_draw_files} per-draw arrays for the sodium cells "
+          "built from literature -- packaging claimed, cell drawn from an "
+          "electrochemical mass balance, remainder as its own component")
     print(f"\n  consolidated -> {params.export.consolidated_output_dir}/, "
           "one file per chemistry with its draw arrays beside it.")
 
@@ -1679,8 +2071,10 @@ def main(argv: list[str] | None = None) -> int:
         held = pd.concat(held_rows, ignore_index=True)
         label = f"{float(capacity):.0f}kWh"
         for chemistry in sorted(held.chemistry.dropna().unique()):
+            band = (element_total_band(model, params, chemistry, float(capacity))
+                    if sodium.is_sodium_cell(params, chemistry) else None)
             figure = draw_chemistry(held, chemistry, label, params,
-                                    top_anchor_kwh=top_anchor)
+                                    top_anchor_kwh=top_anchor, total_band=band)
             if figure is not None:
                 save_figure(figure, params,
                             f"composition_over_time_{chemistry}_{label}.png")
@@ -1716,27 +2110,38 @@ def main(argv: list[str] | None = None) -> int:
                         f"distribution_shared_parts_{capacity:.0f}kWh.png")
             drawn += 1
 
+    whole = collect_draws(model, params, capacity, None)
     figure = draw_distribution(
-        collect_draws(model, params, capacity, None),
+        whole,
         f"Whole battery mass at {capacity:.0f} kWh in "
         f"{params.export.distribution_figure_year} \u2014 every chemistry\n"
         f"{params.monte_carlo.n_draws:,} draws; solid line the mode, dotted the "
-        "2.5 and 97.5 percentiles",
+        f"2.5 and 97.5 percentiles{literature_note(whole, params)}",
         "battery mass in one car [kg]", params)
     if figure is not None:
         save_figure(figure, params, f"distribution_total_{capacity:.0f}kWh.png")
         drawn += 1
     for element in params.export.crm_elements:
+        present = collect_draws(model, params, capacity, element)
         figure = draw_distribution(
-            collect_draws(model, params, capacity, element),
+            present,
             f"{element} at {capacity:.0f} kWh in "
             f"{params.export.distribution_figure_year} \u2014 every chemistry that "
             f"contains it\n{params.monte_carlo.n_draws:,} draws; solid line the mode, "
-            "dotted the 2.5 and 97.5 percentiles",
+            f"dotted the 2.5 and 97.5 percentiles{literature_note(present, params)}",
             f"{element} in one car [kg]", params)
         if figure is not None:
             save_figure(figure, params, f"distribution_{element}_{capacity:.0f}kWh.png")
             drawn += 1
+    # ONE FIGURE PER SODIUM CELL, with every element in a panel of its own.
+    year_draws = improvement_factor_draws(
+        params, float(params.export.distribution_figure_year))
+    for chemistry in sorted(params.export.literature_chemistry_template):
+        elements, masses = sodium_element_draws(model, params, chemistry, capacity)
+        masses = masses * np.asarray(year_draws)[None, :]
+        save_figure(draw_element_panels(chemistry, elements, masses, params, capacity),
+                    params, f"distribution_elements_{chemistry}_{capacity:.0f}kWh.png")
+        drawn += 1
     print(f"\n  figures      -> {drawn} in {params.paths.output_dir}/")
     return 0
 
